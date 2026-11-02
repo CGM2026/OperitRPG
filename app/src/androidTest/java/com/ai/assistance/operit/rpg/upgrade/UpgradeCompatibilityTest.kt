@@ -10,6 +10,7 @@ import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.json.JSONObject
@@ -72,7 +73,7 @@ class UpgradeCompatibilityTest {
             context.startActivity(Intent().setComponent(ComponentName(context.packageName, "com.ai.assistance.operit.ui.main.MainActivity"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             waitText("升级中断战役")
-            waitText("继续叙述")
+            scrollToText("继续叙述")
             screenshot("01-release-open-pending")
             val opened = JSONObject(readRecords().getValue(interruptedId))
             assertMechanicsSame(pendingBefore, opened)
@@ -93,6 +94,7 @@ class UpgradeCompatibilityTest {
             click("升级已玩战役")
             waitText("升级已玩战役")
             click("地点")
+            scrollToText("前往办公室", preferLastScrollable = true)
             click("前往办公室")
             val continued = awaitRecord(playedId) { it.getJSONObject("state").getLong("revision") == 5L && it.getJSONArray("turns").getJSONObject(4).getString("stage") == "COMPLETE" }
             assertEquals(5, continued.getJSONObject("state").getInt("tick"))
@@ -108,9 +110,10 @@ class UpgradeCompatibilityTest {
             screenshot("03-played-campaign-continued")
 
             click("设置")
+            scrollToText("管理模型配置")
             click("管理模型配置")
-            waitText("升级旧模型配置")
-            waitText("https://upgrade.invalid/v1/chat/completions")
+            scrollToText("升级旧模型配置")
+            scrollToText("https://upgrade.invalid/v1/chat/completions")
             assertFalse("The key must remain masked in the visible settings", device.hasObject(By.text("fixture-fake-key-no-network")))
             assertEquals("Viewing legacy settings must not rewrite their preference bytes", expected.getString("modelPreferenceSha256"), digest(preferencesFile.readBytes()))
             val rawConfig = JSONObject(expected.getString("modelRawConfig"))
@@ -160,6 +163,19 @@ class UpgradeCompatibilityTest {
         error("Timed out waiting for explicitly requested local gameplay: $id")
     }
     private fun waitText(text: String) { assertTrue("Visible text missing: $text", device.wait(Until.hasObject(By.text(text)), 15_000) == true) }
+    private fun scrollToText(text: String, preferLastScrollable: Boolean = false) {
+        repeat(10) {
+            if (device.hasObject(By.text(text))) return
+            // LazyColumn exposes only visible items. Scroll the actual pane rather than assuming
+            // the fourth saved turn or a settings control is already in the accessibility tree.
+            val panes = device.findObjects(By.scrollable(true)).filter { it.visibleBounds.height() > 0 }
+            val pane = if (preferLastScrollable) panes.lastOrNull() else panes.maxByOrNull { it.visibleBounds.height() * it.visibleBounds.width() }
+            requireNotNull(pane) { "No visible scrollable pane while looking for: $text" }
+            pane.scroll(Direction.DOWN, 0.75f)
+            device.waitForIdle()
+        }
+        waitText(text)
+    }
     private fun click(text: String) { requireNotNull(device.wait(Until.findObject(By.text(text).enabled(true)), 15_000)) { "Missing enabled action: $text" }.click(); device.waitForIdle() }
     private fun screenshot(name: String) { device.waitForIdle(); assertTrue(device.takeScreenshot(File(folder, "$name.png"))) }
     private fun digest(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

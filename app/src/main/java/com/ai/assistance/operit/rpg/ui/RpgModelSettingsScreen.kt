@@ -73,7 +73,7 @@ fun RpgModelSettingsScreen(onBack: () -> Unit) {
                         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(config.name, style = MaterialTheme.typography.titleMedium)
                             Text(config.protocol?.label() ?: "原配置暂不支持", style = MaterialTheme.typography.bodySmall)
-                            Text(config.endpoint, style = MaterialTheme.typography.bodySmall)
+                            Text(modelAddressLabel(config.endpoint), style = MaterialTheme.typography.bodySmall)
                             Text(config.modelNames.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
                             Text("API Key：${if (config.apiKey.isBlank()) "未设置" else "••••••••"}", style = MaterialTheme.typography.bodySmall)
                             config.unsupportedReason?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -133,7 +133,7 @@ internal fun RpgModelEditor(config: RpgModelConfig?, busy: Boolean, save: (Model
         }
         if (protocol == null) Text("请明确选择协议。", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(endpoint, { endpoint = it }, label = { Text("完整 API 地址") }, enabled = !busy, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4)
-        Text("Chat、Responses、Anthropic 可填写服务地址或完整接口地址；Gemini 填写服务地址或 /v1beta 基础地址。切换协议不会修改已填写的地址。", style = MaterialTheme.typography.bodySmall)
+        Text("Chat、Responses、Anthropic 可填写服务地址或完整接口地址；Gemini 填写服务地址或 /v1beta 基础地址。切换协议不会修改已填写的地址。凭证请填写在 API Key 中，勿放入地址。", style = MaterialTheme.typography.bodySmall)
         if (!validAddress) Text("地址需以 https:// 或 http:// 开头，不能包含账号、查询参数或片段。", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(models, { models = it }, label = { Text("模型名 · 每行一个") }, enabled = !busy, minLines = 2, maxLines = 6, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(key, { key = it }, label = { Text("API Key") }, enabled = !busy, singleLine = true,
@@ -159,4 +159,13 @@ private fun ModelProtocol.label(): String = when (this) {
     ModelProtocol.OPENAI_RESPONSES -> "OpenAI Responses"
     ModelProtocol.ANTHROPIC -> "Anthropic Messages"
     ModelProtocol.GEMINI -> "Gemini generateContent"
+}
+
+/** Never expose credentials embedded in an unsupported legacy URL on the passive list. */
+internal fun modelAddressLabel(endpoint: String): String {
+    val safe = runCatching { URI(endpoint).let {
+        it.scheme?.lowercase() in setOf("http", "https") && !it.host.isNullOrBlank() &&
+            it.rawUserInfo == null && it.rawQuery == null && it.rawFragment == null
+    } }.getOrDefault(false)
+    return if (safe) endpoint else "旧地址包含需重新配置的内容"
 }
