@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 internal object RpgUpdatePolicy {
     const val REPOSITORY = "CGM2026/OperitRPG"
-    const val MAX_APK_BYTES = 2L * 1024 * 1024 * 1024
+    const val MAX_APK_BYTES = 50L * 1024 * 1024 - 1
 
     fun validateUrl(url: String) {
         val uri = URI(url)

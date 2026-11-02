@@ -66,7 +66,7 @@ fun RpgUpdateButton(modifier: Modifier = Modifier) {
     }) { Text("检查新版") }
     if (visible) AlertDialog(
         onDismissRequest = { if (!busy) visible = false },
-        title = { Text("雨夜跑团更新") },
+        title = { Text("二十面骰更新") },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(message)
             if (version.isNotEmpty() && path.isEmpty()) Text("下载时请保持当前页面；旋转屏幕后可安全重试。")

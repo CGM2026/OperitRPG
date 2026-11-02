@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
@@ -12,6 +13,10 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.espresso.Espresso
 import kotlinx.coroutines.flow.MutableStateFlow
+import com.ai.assistance.operit.rpg.model.ModelConfigEdit
+import com.ai.assistance.operit.rpg.model.ModelProtocol
+import com.ai.assistance.operit.rpg.model.RpgModelConfig
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -23,7 +28,7 @@ class RpgScreenTest {
 
     @Test fun finishedCampaignStillAcceptsRulesAndReview() {
         val controller = TestController(play(ending = "阿远已安全离开码头。"))
-        compose.setContent { RpgScreen(controller, {}) }
+        compose.setContent { RpgScreen(controller) }
         compose.onNode(hasSetTextAction()).performTextInput("请回顾找到阿远的经过")
         compose.onNodeWithText("发送").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals("请回顾找到阿远的经过", controller.submitted) }
@@ -34,7 +39,7 @@ class RpgScreenTest {
         val controller = TestController(play(canAct = false).copy(
             clues = listOf(RpgDetail("c1", "阿远的便条", "我去处理货号 K17，稍后回来。")),
             pendingNotice = "本轮结果已保存，请完成叙述后继续。"))
-        compose.setContent { Box(Modifier.requiredSize(320.dp, 480.dp)) { RpgScreen(controller, {}) } }
+        compose.setContent { Box(Modifier.requiredSize(320.dp, 480.dp)) { RpgScreen(controller) } }
         compose.onNode(hasSetTextAction()).performTextInput("再去办公室")
         compose.onNodeWithText("发送").assertIsNotEnabled()
         capture("small-screen-keyboard")
@@ -50,10 +55,48 @@ class RpgScreenTest {
         controller.state.value = controller.state.value.copy(models = List(12) {
             RpgModelOption("m$it", "模型配置 $it", "服务商 · 一个较长的模型名称")
         })
-        compose.setContent { Box(Modifier.requiredSize(320.dp, 480.dp)) { RpgScreen(controller, {}) } }
+        compose.setContent { Box(Modifier.requiredSize(320.dp, 480.dp)) { RpgScreen(controller) } }
         compose.onNodeWithText("设置").performClick()
         compose.onNodeWithText("导出存档").performScrollTo().assertIsDisplayed()
         capture("small-screen-settings")
+    }
+
+    @Test fun editorRequiresExplicitProtocolAndPreservesCompleteEndpoint() {
+        var saved: ModelConfigEdit? = null
+        compose.setContent { MaterialTheme { RpgModelEditor(null, false) { saved = it } } }
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("我的模型")
+        compose.onAllNodes(hasSetTextAction())[1].performScrollTo().performTextReplacement("https://example.test/custom/v1/messages")
+        compose.onAllNodes(hasSetTextAction())[2].performScrollTo().performTextInput("model-a\nmodel-b")
+        compose.onNodeWithText("保存配置").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Anthropic Messages").performScrollTo().performClick()
+        compose.onNodeWithText("保存配置").performScrollTo().assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(ModelProtocol.ANTHROPIC, saved?.protocol)
+            assertEquals("https://example.test/custom/v1/messages", saved?.endpoint)
+            assertEquals(listOf("model-a", "model-b"), saved?.modelNames)
+        }
+    }
+
+    @Test fun unsupportedLegacyConfigurationNeedsExplicitProtocolBeforeSave() {
+        val old = RpgModelConfig("legacy", "旧OAuth", "", "https://example.test/old", listOf("old-model"),
+            "OAUTH", null, "此旧 OAuth 配置暂不支持", JsonObject(emptyMap()))
+        compose.setContent { MaterialTheme { RpgModelEditor(old, false) {} } }
+        compose.onNodeWithText("保存配置").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("OpenAI Responses").performScrollTo().performClick()
+        compose.onNodeWithText("保存配置").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun cleartextHttpRequiresConfirmationBeforeSave() {
+        var saved: ModelConfigEdit? = null
+        compose.setContent { MaterialTheme { RpgModelEditor(null, false) { saved = it } } }
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("本地服务")
+        compose.onAllNodes(hasSetTextAction())[1].performScrollTo().performTextReplacement("http://192.168.1.2:8080/v1/chat/completions")
+        compose.onAllNodes(hasSetTextAction())[2].performScrollTo().performTextInput("local-model")
+        compose.onNodeWithText("OpenAI Chat Completions").performScrollTo().performClick()
+        compose.onNodeWithText("保存配置").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(null, saved) }
+        compose.onNodeWithText("确认保存").performClick()
+        compose.runOnIdle { assertEquals("http://192.168.1.2:8080/v1/chat/completions", saved?.endpoint) }
     }
 
     private fun capture(name: String) {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -35,14 +36,21 @@ private val RpgColors = lightColorScheme(
     error = Clay, errorContainer = Color(0xFFEFE3DD), outline = Color(0xFFD9DDD6)
 )
 
+/** Standalone entry for the dedicated app; shares the campaign's paper theme. */
+@Composable
+fun DiceModelSettingsScreen(onBack: () -> Unit) {
+    MaterialTheme(colorScheme = RpgColors, typography = rpgTypography()) {
+        Surface(Modifier.fillMaxSize(), color = Paper) { RpgModelSettingsScreen(onBack) }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RpgScreen(
-    controller: RpgUiController,
-    onOpenModelSettings: () -> Unit
-) {
+fun RpgScreen(controller: RpgUiController) {
     val state by controller.state.collectAsState()
     var page by rememberSaveable { mutableStateOf("list") }
+    var modelReturnPage by rememberSaveable { mutableStateOf("list") }
+    val pageState = rememberSaveableStateHolder()
     var panel by rememberSaveable { mutableStateOf<String?>(null) }
     var clueId by rememberSaveable { mutableStateOf<String?>(null) }
     var draft by rememberSaveable(state.campaign?.id) { mutableStateOf("") }
@@ -57,6 +65,8 @@ fun RpgScreen(
         if (it != null) controller.export(it)
     }
     val campaign = state.campaign
+    val openModels: () -> Unit = { keyboard?.hide(); modelReturnPage = page; page = "models" }
+    val closeModels: () -> Unit = { page = modelReturnPage; controller.refresh() }
     // Loading a route only reads local state. Retrying a model stage always requires a tap.
     LaunchedEffect(controller) { controller.refresh() }
     LaunchedEffect(campaign?.id) { if (campaign != null) page = "play" }
@@ -64,6 +74,8 @@ fun RpgScreen(
         when {
             clueId != null -> clueId = null
             panel != null -> panel = null
+            page == "models" -> closeModels()
+            page == "appSettings" -> page = "list"
             page == "settings" -> page = "play"
             page == "rules" -> page = if (campaign != null) "settings" else "list"
             else -> { page = "list"; controller.closeCampaign() }
@@ -72,14 +84,15 @@ fun RpgScreen(
     MaterialTheme(colorScheme = RpgColors, typography = rpgTypography()) {
         Surface(Modifier.fillMaxSize(), color = Paper) {
             Column(Modifier.fillMaxSize().imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                if (page != "models") Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
-                        Text(when (page) { "create" -> "新的战役"; "settings" -> "战役设置"; "rules" -> "本团规则"; "play" -> campaign?.title ?: "跑团"; else -> "跑团" }, style = MaterialTheme.typography.titleLarge)
+                        Text(when (page) { "create" -> "新的战役"; "settings" -> "战役设置"; "appSettings" -> "设置"; "rules" -> "本团规则"; "play" -> campaign?.title ?: "二十面骰"; else -> "二十面骰" }, style = MaterialTheme.typography.titleLarge)
                         if (page == "list") Text("一个人，也能走进故事。", style = MaterialTheme.typography.labelMedium)
                     }
                     if (page == "play") TextButton(onClick = { keyboard?.hide(); page = "settings" }) { Text("设置") }
+                    if (page == "list") TextButton(onClick = { page = "appSettings" }) { Text("设置") }
                     if (page != "list") TextButton(onClick = {
-                        if (page == "settings") page = "play" else { page = "list"; controller.closeCampaign() }
+                        if (page == "settings") page = "play" else if (page == "appSettings") page = "list" else { page = "list"; controller.closeCampaign() }
                     }) { Text("返回") }
                 }
                 state.message?.let { message ->
@@ -90,12 +103,18 @@ fun RpgScreen(
                         }
                     }
                 }
-                when (page) {
+                pageState.SaveableStateProvider(page) { when (page) {
                     "list" -> CampaignList(state, onCreate = { page = "create" }, onOpen = controller::openCampaign,
                         onImport = { importFile.launch(arrayOf("application/zip", "application/octet-stream")) })
-                    "create" -> CreateCampaign(state, controller::createCampaign, onOpenModelSettings)
+                    "create" -> CreateCampaign(state, controller::createCampaign, openModels)
+                    "models" -> RpgModelSettingsScreen(closeModels)
+                    "appSettings" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        OutlinedButton(onClick = openModels, modifier = Modifier.fillMaxWidth()) { Text("模型配置") }
+                        RpgUpdateButton(Modifier.fillMaxWidth())
+                        Text("二十面骰 · 单人文字跑团", style = MaterialTheme.typography.bodySmall)
+                    }
                     "rules" -> Rules()
-                    "settings" -> if (campaign != null) CampaignSettings(state, campaign, controller, onOpenModelSettings,
+                    "settings" -> if (campaign != null) CampaignSettings(state, campaign, controller, openModels,
                         { page = "rules" }, { exportFile.launch("${campaign.title}.rpgsave.zip") },
                         { importFile.launch(arrayOf("application/zip", "application/octet-stream")) })
                     "play" -> if (campaign != null) {
@@ -142,7 +161,7 @@ fun RpgScreen(
                         if (draft.length > 2000) Text("行动最多 2000 字，请缩短后发送。", Modifier.padding(horizontal = 28.dp), color = Clay, style = MaterialTheme.typography.bodySmall)
                         if (campaign.modelId == null) TextButton(onClick = { page = "settings" }, modifier = Modifier.padding(horizontal = 28.dp)) { Text("请先为本战役选择模型") }
                     }
-                }
+                } }
             }
             if (panel != null && campaign != null) ModalBottomSheet(onDismissRequest = { panel = null; clueId = null }, containerColor = Paper) {
                 BackHandler { if (clueId != null) clueId = null else panel = null }
@@ -228,31 +247,32 @@ private fun CreateCampaign(state: RpgUiState, create: (String, String, String) -
     var title by rememberSaveable { mutableStateOf("雨夜旧码头") }
     var name by rememberSaveable { mutableStateOf("林舟") }
     var model by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedAvailable = state.models.any { it.id == model && it.selectable }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text("雨夜码头", style = MaterialTheme.typography.titleLarge)
         Text("一场单人调查冒险。用自己的话行动，由程序处理检定与后果。")
         OutlinedTextField(title, { title = it }, label = { Text("战役名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(name, { name = it }, label = { Text("人物姓名") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         ModelPicker(state.models, model, !state.busy, { model = it }, configure)
-        Button(onClick = { model?.let { create(title.trim(), name.trim(), it) } }, enabled = title.isNotBlank() && name.isNotBlank() && model != null && !state.busy, modifier = Modifier.fillMaxWidth()) { Text("开始故事") }
-        if (model == null) Text("选择一个模型后即可开始。", style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { model?.let { create(title.trim(), name.trim(), it) } }, enabled = title.isNotBlank() && name.isNotBlank() && selectedAvailable && !state.busy, modifier = Modifier.fillMaxWidth()) { Text("开始故事") }
+        if (!selectedAvailable) Text("选择一个可用模型后即可开始。", style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun ModelPicker(models: List<RpgModelOption>, selected: String?, enabled: Boolean, select: (String) -> Unit, configure: () -> Unit) {
     Text("本团模型", style = MaterialTheme.typography.titleMedium)
-    if (models.isEmpty()) Text("还没有模型配置，请在 Operit 模型设置中添加。")
+    if (models.isEmpty()) Text("还没有模型配置，请先添加。")
     models.forEach { model ->
-        OutlinedCard(onClick = { select(model.id) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        OutlinedCard(onClick = { select(model.id) }, enabled = enabled && model.selectable, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RadioButton(selected = model.id == selected, onClick = null, enabled = enabled)
+                RadioButton(selected = model.id == selected, onClick = null, enabled = enabled && model.selectable)
                 Column { Text(model.title); Text(model.detail, style = MaterialTheme.typography.bodySmall)
                     if (model.demo) Text("演示模式 · 不连接网络", color = Clay, style = MaterialTheme.typography.bodySmall) }
             }
         }
     }
-    TextButton(onClick = configure, enabled = enabled) { Text("打开 Operit 模型设置") }
+    TextButton(onClick = configure, enabled = enabled) { Text("管理模型配置") }
 }
 
 @Composable

@@ -1,0 +1,174 @@
+name: D20 signed upgrade on x86_64
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: 'Successful signed candidate workflow run from this exact commit'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: d20-upgrade-smoke
+  cancel-in-progress: false
+
+env:
+  RPG_EXPECTED_SIGNER_SHA256: '8838939d69b547bbe6a27483da9819e07fe9e2799b66e5e3b51360df9cbbc373'
+
+jobs:
+  upgrade:
+    if: github.repository == 'CGM2026/OperitRPG'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download and bind the exact release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c 'import os; assert os.environ["CANDIDATE_RUN_ID"].isdigit()'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" > "$RUNNER_TEMP/candidate-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads(Path(os.environ['RUNNER_TEMP']+'/candidate-run.json').read_text())
+          if run['conclusion'] != 'success' or run['path'] != '.github/workflows/rpg-release.yml':
+              raise ValueError('Candidate must come from a successful signed release workflow')
+          if run['head_sha'] != os.environ['GITHUB_SHA']:
+              raise ValueError('Upgrade tests must use the exact candidate source commit')
+          PY
+          gh run download "$CANDIDATE_RUN_ID" --name d20-release-candidate --dir candidate --repo "$GITHUB_REPOSITORY"
+          mkdir -p upgrade-evidence
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from pathlib import Path
+          env = os.environ
+          manifest = json.loads(Path('candidate/update-manifest.json').read_text())
+          version = manifest['versionName']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version) or manifest['versionCode'] <= 1:
+              raise ValueError('Candidate must upgrade the legacy versionCode 1')
+          if manifest['applicationId'] != 'io.github.cgm2026.operitrpg' or manifest['signerSha256'] != env['RPG_EXPECTED_SIGNER_SHA256']:
+              raise ValueError('Candidate identity differs from the published app')
+          apk = Path(f'candidate/operit-rpg-{version}.apk')
+          with apk.open('rb') as stream:
+              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          if digest != manifest['sha256'] or apk.stat().st_size != manifest['sizeBytes']:
+              raise ValueError('Candidate APK differs from its release manifest')
+          source = json.loads(Path('candidate/source.json').read_text())
+          if source != {'runId':int(env['CANDIDATE_RUN_ID']), 'headSha':env['GITHUB_SHA']}:
+              raise ValueError('Candidate provenance does not match the selected workflow')
+          Path('upgrade-evidence/candidate.json').write_text(json.dumps({'candidateRunId':int(env['CANDIDATE_RUN_ID']), 'headSha':env['GITHUB_SHA'], 'apkSha256':digest, 'versionName':version, 'versionCode':manifest['versionCode']}, indent=2)+'\n')
+          with Path(env['GITHUB_ENV']).open('a') as output:
+              output.write(f'RPG_VERSION={version}\nRPG_CODE={manifest["versionCode"]}\nD20_UPGRADE_APK_PATH={apk.resolve()}\n')
+          PY
+
+      - name: Restore Gradle caches
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: d20-upgrade-gradle-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            d20-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-
+            d20-gradle-${{ runner.os }}-
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: ''
+
+      - name: Configure existing permanent signing identity
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RPG_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RPG_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RPG_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RPG_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            test -n "${!name}" || { echo "Missing required secret: $name" >&2; exit 1; }
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/rpg-release.p12"
+          chmod 600 "$RUNNER_TEMP/rpg-release.p12"
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          env = os.environ
+          def prop(value):
+              return value.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('=', '\\=').replace(':', '\\:')
+          values = {'sdk.dir': env['ANDROID_HOME'], 'RELEASE_STORE_FILE': env['RUNNER_TEMP']+'/rpg-release.p12', 'RELEASE_STORE_PASSWORD':env['STORE_PASSWORD'], 'RELEASE_KEY_ALIAS':env['KEY_ALIAS'], 'RELEASE_KEY_PASSWORD':env['KEY_PASSWORD']}
+          Path('local.properties').write_text(''.join(key+'='+prop(value)+'\n' for key,value in values.items()))
+          PY
+
+      - name: Build legacy fixture, optimized app and release instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :upgrade-fixture:assembleRelease :app:assembleRelease :app:assembleReleaseAndroidTest \
+            -PrpgUpgradeFixture=true -PrpgUpgradeSmoke=true -PandroidTestBuildType=release -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
+            --max-workers=2 --no-parallel --stacktrace --no-daemon
+          mkdir -p upgrade-evidence
+          for apk in upgrade-fixture/build/outputs/apk/release/upgrade-fixture-release.apk "$D20_UPGRADE_APK_PATH"; do
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" > upgrade-evidence/$(basename "$apk").signature.txt
+            grep -q "Signer #1 certificate SHA-256 digest: $RPG_EXPECTED_SIGNER_SHA256" upgrade-evidence/$(basename "$apk").signature.txt
+            test "$(apkanalyzer manifest application-id "$apk")" = 'io.github.cgm2026.operitrpg'
+          done
+          test "$(apkanalyzer manifest version-code upgrade-fixture/build/outputs/apk/release/upgrade-fixture-release.apk)" = '1'
+          test "$(apkanalyzer manifest version-code "$D20_UPGRADE_APK_PATH")" = "$RPG_CODE"
+
+      # KVM setup follows the emulator action's official Linux runner instructions.
+      - name: Enable hardware acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Verify same-signature upgrade without clearing app data
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 2048M
+          disable-animations: true
+          script: bash ci/run_upgrade_smoke.sh
+
+      - name: Upload upgrade verification evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: d20-upgrade-evidence
+          path: |
+            upgrade-evidence/**
+            app/build/reports/**
+            app/schemas/**
+          if-no-files-found: warn
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/rpg-release.p12" local.properties

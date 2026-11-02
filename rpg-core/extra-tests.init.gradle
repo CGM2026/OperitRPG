@@ -10,7 +10,6 @@ gradle.projectsEvaluated {
             include("${packagePath}/rpg/update/RpgRelease.kt")
             include("${packagePath}/rpg/update/RpgUpdatePolicy.kt")
             include("${packagePath}/rpg/update/RpgDownloadVerifier.kt")
-            include("${packagePath}/util/PrivateLogScope.kt")
         }
         sourceSets.test.kotlin {
             srcDir(rootProject.file('../app/src/test/java'))
@@ -18,15 +17,14 @@ gradle.projectsEvaluated {
             include("${packagePath}/rpg/backup/**")
             include("${packagePath}/rpg/update/RpgUpdatePolicyTest.kt")
             include("${packagePath}/rpg/update/RpgDownloadVerifierTest.kt")
-            include("${packagePath}/rpg/update/PrivateLogScopeTest.kt")
         }
+        sourceSets.test.resources.srcDir(rootProject.file('../app/src/test/resources'))
         // Needed by live manifest/backup sources only in this opt-in test build.
         dependencies { implementation 'org.json:json:20240303' }
         tasks.named('compileKotlin').configure {
             doFirst {
                 def selected = sourceSets.main.kotlin.files
                 assert selected.any { it.name == 'RpgUpdatePolicy.kt' }
-                assert selected.any { it.name == 'PrivateLogScope.kt' }
                 assert !selected.any { it.name in ['RpgUpdateManager.kt', 'RpgUpdateButton.kt'] }
                 assert !selected.any { it.path.contains('isolated-update-src') }
                 logger.lifecycle('Standalone RPG checks compile {} live source files', selected.size())

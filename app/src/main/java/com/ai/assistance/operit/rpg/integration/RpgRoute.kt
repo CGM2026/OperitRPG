@@ -6,8 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.ai.assistance.operit.data.model.*
-import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.rpg.backup.RpgBackupService
 import com.ai.assistance.operit.rpg.core.*
 import com.ai.assistance.operit.rpg.data.*
@@ -18,16 +16,16 @@ import kotlinx.coroutines.flow.*
 import java.util.UUID
 
 @Composable
-fun RpgRoute(onOpenModelSettings: () -> Unit) {
+fun RpgRoute() {
     val controller: RpgViewModel = viewModel()
-    RpgScreen(controller, onOpenModelSettings)
+    RpgScreen(controller)
 }
 
 class RpgViewModel(application: Application) : AndroidViewModel(application), RpgUiController {
     private val app = application
-    private val manager = ModelConfigManager(app)
+    private val manager = RpgModelConfigStore.get(app)
     private val store = RoomGameStore(RpgDatabase.get(app))
-    private val gateway = SelectedModelGateway(OperitModelGateway(app, manager))
+    private val gateway = SelectedModelGateway(OperitModelGateway(manager::get))
     private val engine = TurnCoordinator(store, gateway)
     private val backups = RpgBackupService(store, app.cacheDir)
     private val preferences = app.getSharedPreferences("rpg-ui", 0)
@@ -47,7 +45,7 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
                 store.changes.collect { load() }
             } catch (e: Exception) { if (e is CancellationException) throw e; message("无法读取存档，请保留原数据并重试。") }
         }
-        viewModelScope.launch { manager.configSummariesFlow.collect { loadModels() } }
+        viewModelScope.launch { safely { manager.configurations.collect { loadModels(); load() } } }
     }
 
     override fun refresh() { viewModelScope.launch { safely { loadModels(); load() } } }
@@ -165,14 +163,15 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
         val options = mutableListOf(RpgModelOption("demo", "离线演示", "固定演示主持，用于验收流程，不调用云端模型", true))
         val map = mutableMapOf("demo" to ModelConfiguration("demo", "DEMO", "script-v1", "demo-v1"))
         withContext(Dispatchers.IO) {
-            manager.getAllConfigSummaries().forEach { summary ->
-                val config = manager.getModelConfig(summary.id) ?: return@forEach
-                if (ApiProviderType.fromProviderTypeId(config.apiProviderTypeId) == null) return@forEach
-                if (config.apiProviderType in setOf(ApiProviderType.MNN, ApiProviderType.LLAMA_CPP)) return@forEach
-                getModelList(config.modelName).forEachIndexed { index, model ->
+            manager.list().forEach { config ->
+                if (config.protocol == null) {
+                    options += RpgModelOption("${config.id}:unsupported", config.name, config.unsupportedReason ?: "请重新配置", selectable = false)
+                    return@forEach
+                }
+                config.modelNames.forEachIndexed { index, model ->
                     val key = "${config.id}:$index"
-                    map[key] = ModelConfiguration(config.id, config.apiProviderTypeId, model, configurationFingerprint(config, model))
-                    options += RpgModelOption(key, config.name, "${config.apiProviderTypeId} · $model")
+                    map[key] = config.snapshot(model)
+                    options += RpgModelOption(key, config.name, "${config.protocol} · $model")
                 }
             }
         }

@@ -2,43 +2,22 @@
 fork: https://github.com/CGM2026/OperitRPG
 ---
 
-# 雨夜跑团发布与更新
+# 二十面骰构建与发布
 
-独立应用身份为 `io.github.cgm2026.operitrpg`，首版 `0.1.0` / versionCode `1`。上游源码 namespace 保持原值。应用与原版可同时安装，各自保存资料。
+0.2.0 / versionCode 2 为专用跑团应用。名称改为“二十面骰”，applicationId 继续为 `io.github.cgm2026.operitrpg`，namespace 为 `com.ai.assistance.operit`，使用 0.1.0 原有永久签名，数据库 `rpg-v1.db` 和 schema 版本 1 保持不变。
 
-发布入口为 Actions 的 **RPG signed release**，手动输入 `version_name` 和 `version_code`。首次使用 `0.1.0`、`1`。以后两者都必须递增。发布标签为 `rpg-v<version_name>`；同一标签不覆盖。也可更新 app/build.gradle.kts 中的默认 versionCode 后推送对应 `rpg-v*` 标签发布。正式安装应始终使用 release APK。
+默认工程只包含 app 和 rpg-core。依赖仅保留 Compose、AndroidX activity/lifecycle/core、Room/kapt、serialization、coroutines、OkHttp 和 DataStore preferences。没有原生模块、NDK/CMake、JNI、ObjectBox、终端、浏览器、语音、FFmpeg、模型包或 JS 资产构建。release 启用 R8 与资源压缩；最低 Android 26，compile/target SDK 36。专用 app 的全部 JVM 测试正常执行，没有测试源码筛选开关。
 
-仓库必须配置四个 Actions Secrets：
+发布入口仍为 Actions 的 D20 signed release，输入 version_name/version_code；两者必须比最新正式版本递增。首个专用版使用 0.2.0、2。标签仍为 `rpg-v<version>`，APK 仍为 `operit-rpg-<version>.apk`，让 0.1.0 的应用内更新可以直接找到新包。
 
-- `RPG_KEYSTORE_BASE64`：永久发布 PKCS12 keystore 的 base64 内容
-- `RPG_STORE_PASSWORD`：keystore 密码
-- `RPG_KEY_ALIAS`：签名别名
-- `RPG_KEY_PASSWORD`：签名私钥密码
+四个 Secrets 沿用已有值，不生成新 key：RPG_KEYSTORE_BASE64、RPG_STORE_PASSWORD、RPG_KEY_ALIAS、RPG_KEY_PASSWORD。缺失任一项立即失败。签名字段写入 runner 临时 keystore 与 local.properties，结束后删除；缓存仅保存 Gradle 用户目录。
 
-缺失任一项会在依赖下载前失败。签名材料仅写入 runner 临时目录，结束时删除。发布构建不使用 debug 签名、不执行上游证书轮换。发布者须离线备份永久 keystore；丢失后不能覆盖安装已有版本。
+CI 使用 JDK 21、SDK platform 36 和 build-tools 35.0.0，依次运行 core/app 完整单测、release lint 与压缩构建。发布前核对包名、版本、target SDK、apksigner 签名、APK SHA256，签名必须与已发布 0.1.0 的证书一致。APK 必须小于 50 MiB，不得包含 lib/ 目录、任何 .so 或未批准的重型 assets。验证通过后发布 APK、update-manifest.json、SHA256SUMS 和 signature.txt。发布说明从同目录 RELEASE_NOTES.md 读取。
 
-完整构建使用 JDK 21、Node 22、Android SDK 36、NDK 25.1.8937393、CMake 3.22.1、Rust 1.88.0。流程保留上游 terminal 子模块、libs/subpack/jniLibs 三套外部依赖、native ripgrep、WebChat 和 ToolPkg 资产。外部归档沿用上游固定 Google Drive 文件 id，通过上游检查解压到规定目录；下载链接或权限失效时构建会失败。归档来源目前没有内容 SHA256 锁，首轮成功后可记录稳定归档校验值。
+首次专用版先把发布流程的 publish 设置为 false，取得 d20-release-candidate artifact。然后在相同 commit 启动 D20 signed upgrade on x86_64，传入 candidate_run_id；流程核对来源成功与 head 一致，再安装 artifact 中的实际 APK。升级测试通过后发布这些已验证文件，不重新构建替代 APK。以后的正式发布也应先完成对应候选包的升级验证。publish 输入默认 true，维护者须按上述顺序选择候选构建和正式发布。
 
-依赖归档在解压验证成功后立即保存缓存，native ripgrep 在构建成功后立即保存缓存；后面的 Android 编译失败不会丢失这些缓存。CMake 已取得的源码和 STT 资产在文件存在时也会保存，包括构建失败场景。缓存使用明确的 restore/save 步骤，构建错误继续使 job 失败。CI 限制 Gradle 为两个 worker、关闭并行项目构建，Kotlin 与 Gradle 同进程，Gradle 堆上限 6 GiB。
+更新接口与原版本保持相同仓库和文件命名。用户确认后下载，校验字节数、SHA256、包名、版本及已安装应用的签名。每个下载使用独立 UUID 文件并响应协程取消，旋转后可安全重试；安装权限设置返回后继续系统安装确认。专用版下载限制也收紧为小于 50 MiB。
 
-构建运行 rpg-core 测试和 app 中的 RPG release 单测并生成完整 release APK。发布 CI 显式设置 `-PrpgOnlyTests=true`，只编译 RPG 单测源码，并要求实际执行报告和 AppLogger 集成测试报告存在；生产源码和所有测试依赖保持完整。默认不带该属性时仍保留上游完整测试集。发布前用 apksigner 检查签名，用 apkanalyzer 对照包名和版本，再生成 `update-manifest.json`、`SHA256SUMS` 与 `signature.txt`。上游其他 workflows 在本 fork 跳过，仍保留原定义供查阅。
+本地纯 JVM 更新测试通过仓库中的 `rpg-core/extra-tests.init.gradle` 直接引用原文件，覆盖旧版到专用版协议、地址/重定向、大小/hash 和下载取消。Android/R8 的实际构建结果以 0.2.0 的 Actions 为准。
 
-发布说明来自同目录 `RELEASE_NOTES.md`，每次发布前维护此文件，不自动汇入上游提交历史。Gradle 用户缓存和 wrapper 采用独立 restore/save，即使编译失败也保存已下载依赖和可复用构建缓存；缓存不包含项目 local.properties 或签名目录。
-
-## 应用更新接口
-
-设置页面调用 `com.ai.assistance.operit.rpg.update.RpgUpdateButton()`。用户点击“检查新版”才请求 GitHub latest release 和该标签中的 manifest；确认“下载并安装”才下载 APK。应用显示下载进度，核对 SHA256、大小、包名、versionCode、versionName 和当前已安装版本的签名证书。系统未知来源安装设置返回后继续安装，取消或失败可重试。
-
-每次下载使用独立 UUID 缓存文件，取消或失败只删除本次文件。读取循环检查协程取消；旋转导致页面重建时停止旧请求，新页面可安全重试，不会覆盖或删除其他下载。
-
-更新只接受规定 GitHub HTTPS 域名和本仓库对应版本的 APK，逐次验证重定向；manifest 最大 1 MiB，APK 最大 2 GiB。APK 保存在应用私有缓存，通过现有 FileProvider 和 `REQUEST_INSTALL_PACKAGES` 打开系统安装页面。系统最终安装仍由用户确认。调试包身份带 `.debug`，与正式更新通道身份不同。
-
-## 检查记录
-
-本地通过全部 workflow YAML 解析、发布流程内嵌 Python 语法检查、15 段发布 shell 脚本的 `bash -n` 和 `git diff --check`。使用仓库内 `rpg-core/extra-tests.init.gradle` 直接从原文件合跑 46 项 JVM 测试全部通过，包括核心 26、备份 9、更新 manifest/地址/重定向策略 5、下载 SHA256/长度验证 4、私密日志协程隔离 2。脚本不使用临时源码快照、不加载 Android manager 或 UI；真实 AppLogger 文件输出/Logcat 守卫测试纳入 app CI。
-
-本机缺少完整 Android SDK/NDK，Android 编译与手机安装验证由首轮 Actions 产物和设备验收完成。
-
-RPG 模型调用通过 `AppLogger.withPrivateLogging` 隔离当前请求及其子协程，阻断提示正文、响应和异常进入 Logcat 或日志文件；并发的通用请求保持原有日志行为。首版 RPG 排除本地 MNN/LLAMA_CPP 和插件供应商，云服务使用现有同步 HTTP 调用路径。
-
-设备验收需从已签名首版实际安装，再发布更高版本，检查版本说明、下载确认、未知来源返回、系统安装确认和资料保留；同时检查断网重试、错误 SHA256、错误包名、错误签名和较旧版本被拒绝。
+x86_64 升级验收使用独立的旧 schema 小 fixture APK：同 applicationId、同永久签名、versionCode 1，种入旧版数据库与模型偏好，再覆盖安装专用 release 验证数据。原来的 0.1.0 APK 仅含 arm64，不能直接在 x86_64 模拟器运行。fixture 是测试工具，不属于默认工程或发布产物。

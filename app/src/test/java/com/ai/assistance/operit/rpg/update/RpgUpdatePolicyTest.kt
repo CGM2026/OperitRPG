@@ -20,6 +20,15 @@ class RpgUpdatePolicyTest {
         assertNull(parse(manifest(), 3))
     }
 
+    @Test fun dedicatedVersionKeepsTheLegacyPackageAndReleaseAssetContract() {
+        val data = manifest().put("versionName", "0.2.0").put("versionCode", 2)
+            .put("apkUrl", "https://github.com/CGM2026/OperitRPG/releases/download/rpg-v0.2.0/operit-rpg-0.2.0.apk")
+        val update = RpgUpdatePolicy.release(data, "rpg-v0.2.0", "二十面骰", appId, 1)
+        assertEquals(2L, update!!.code)
+        assertEquals("0.2.0", update.version)
+        assertNull(RpgUpdatePolicy.release(data, "rpg-v0.2.0", "二十面骰", appId, 2))
+    }
+
     @Test fun refusesWrongPackageVersionOrForeignRepository() {
         rejects { parse(manifest().put("applicationId", "com.ai.assistance.operit")) }
         rejects { parse(manifest().put("versionName", "0.2.0")) }

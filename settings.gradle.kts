@@ -1,35 +1,12 @@
 pluginManagement {
-    repositories {
-        google()
-        gradlePluginPortal()
-        mavenCentral()
-    }
+    repositories { google(); gradlePluginPortal(); mavenCentral() }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-        maven { url = uri("https://jitpack.io") }
-        maven { url = uri("https://dl.bintray.com/rikkaw/Shizuku") }
-        maven { url = uri("https://api.xposed.info/") }
-        maven { url = uri("https://oss.sonatype.org/content/repositories/snapshots") }
-    }
+    repositories { google(); mavenCentral() }
 }
-
-rootProject.name = "Operit"
-include(":app")
-include(":rpg-core")
-include(":dragonbones")
-project(":dragonbones").projectDir = file("avator/dragonbones")
-include(":terminal")
-include(":mnn")
-project(":mnn").projectDir = file("llm/mnn")
-include(":llama")
-project(":llama").projectDir = file("llm/llama")
-include(":mmd")
-project(":mmd").projectDir = file("avator/mmd")
-include(":fbx")
-project(":fbx").projectDir = file("avator/fbx")
-include(":showerclient")
-include(":quickjs")
+rootProject.name = "D20"
+include(":app", ":rpg-core")
+if (providers.gradleProperty("rpgUpgradeFixture").orNull == "true") {
+    include(":upgrade-fixture")
+}

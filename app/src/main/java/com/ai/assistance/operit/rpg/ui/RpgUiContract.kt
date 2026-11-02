@@ -13,7 +13,7 @@ data class RpgUiState(
     val importPreview: RpgImportPreview? = null
 )
 data class RpgCampaignSummary(val id: String, val title: String, val subtitle: String, val ended: Boolean = false)
-data class RpgModelOption(val id: String, val title: String, val detail: String, val demo: Boolean = false)
+data class RpgModelOption(val id: String, val title: String, val detail: String, val demo: Boolean = false, val selectable: Boolean = true)
 data class RpgImportPreview(val title: String, val playerName: String, val detail: String)
 data class RpgDetail(val id: String, val title: String, val detail: String, val sourceTurnId: String? = null, val actionEnabled: Boolean = true)
 data class RpgTurnUi(

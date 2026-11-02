@@ -1,46 +1,43 @@
-name: RPG signed release
+name: D20 signed release
 
 on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version (must increase, e.g. 0.1.0)'
+        description: 'Version (must increase)'
         required: true
-        default: '0.1.0'
+        default: '0.2.0'
       version_code:
         description: 'Android versionCode (strictly increasing)'
         required: true
-        default: '1'
+        default: '2'
+      publish:
+        description: 'Publish after build (use false for a candidate requiring upgrade smoke first)'
+        required: true
+        default: true
+        type: boolean
   push:
     tags: ['rpg-v*']
 
 concurrency:
   group: rpg-release
   cancel-in-progress: false
-
 permissions:
   contents: write
-
 env:
   JAVA_VERSION: '21'
-  NODE_VERSION: '22'
-  ANDROID_NDK_VERSION: '25.1.8937393'
-  ANDROID_CMAKE_VERSION: '3.22.1'
-  ANDROID_API_LEVEL: '26'
-  RUST_VERSION: '1.88.0'
-  MANUAL_DEPS_DIR: manual-deps
+  RPG_EXPECTED_SIGNER_SHA256: '8838939d69b547bbe6a27483da9819e07fe9e2799b66e5e3b51360df9cbbc373'
 
 jobs:
   release:
     if: github.repository == 'CGM2026/OperitRPG'
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 45
     steps:
       - name: Checkout source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 1
           persist-credentials: false
           submodules: false
 
@@ -59,183 +56,34 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/rpg-release.p12"
           chmod 600 "$RUNNER_TEMP/rpg-release.p12"
 
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.12'
-
-      - name: Initialize terminal submodule
-        shell: bash
-        run: |
-          set -euo pipefail
-          git submodule sync -- terminal
-          git submodule update --init --recursive --depth 1 terminal
-          git submodule status -- terminal
-
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Restore Gradle dependency and build cache
+      - name: Restore Gradle caches
         id: cache-gradle
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: rpg-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-${{ github.run_id }}
+          key: d20-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-${{ github.run_id }}
           restore-keys: |
-            rpg-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-
-            rpg-gradle-${{ runner.os }}-
-
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+            d20-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-
+            d20-gradle-${{ runner.os }}-
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
         with:
           packages: ''
 
-      - name: Install Android SDK, NDK and CMake
+      - name: Install SDK platform and build tools
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-34" \
-            "platforms;android-36" \
-            "build-tools;34.0.0" \
-            "build-tools;35.0.0" \
-            "ndk;$ANDROID_NDK_VERSION" \
-            "cmake;$ANDROID_CMAKE_VERSION"
-
-      - name: Identify native compilation cache context
-        id: native-cache-context
-        shell: bash
-        run: |
-          set -euo pipefail
-          context=$( { printf '%s\n' "$GITHUB_WORKSPACE" "$ANDROID_HOME" "$ImageOS" "$ImageVersion"; find "$ANDROID_HOME/ndk" "$ANDROID_HOME/cmake" -maxdepth 2 -name source.properties -print -exec cat {} \; | sort; } | sha256sum | cut -d' ' -f1 )
-          echo "context=$context" >> "$GITHUB_OUTPUT"
-
-      # Ninja files contain absolute workspace/SDK paths. Reuse only with identical paths,
-      # runner image/toolchains and native sources/configuration; Gradle/Ninja still validate them.
-      - name: Restore native compilation artifacts
-        id: cache-native-products
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            **/.cxx
-            **/build/intermediates/cxx
-          key: rpg-native-products-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-cache-context.outputs.context }}-${{ hashFiles('**/*.cpp', '**/*.cc', '**/*.c', '**/*.h', '**/*.hpp', '**/*.S', '**/*.cmake', '**/CMakeLists.txt', '**/*.gradle.kts', 'gradle/**', 'gradle.properties', '.gitmodules') }}
-
-      - name: Restore Android CMake source cache
-        id: cache-cmake
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            **/.cxx/operit_deps/*-src
-          key: android-cmake-sources-${{ runner.os }}-${{ runner.arch }}-arm64-v8a-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}-${{ hashFiles('cmake/**', '**/CMakeLists.txt', '**/*.cmake', '**/build.gradle.kts', 'gradle.properties') }}
-
-      - name: Restore Android dependency cache
-        id: cache-manual-deps
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ env.MANUAL_DEPS_DIR }}
-          key: android-full-deps-${{ runner.os }}-${{ hashFiles('ci/script/download_android_dependencies.sh', 'ci/script/prepare_android_dependencies.py') }}
-
-      - name: Restore generated STT asset cache
-        id: cache-stt
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: app/build/generated/stt-model-assets
-          key: stt-model-assets-${{ runner.os }}-${{ hashFiles('app/config/stt-model-assets.properties') }}
-
-      - name: Download Android dependencies
-        if: steps.cache-manual-deps.outputs.cache-hit != 'true'
-        run: bash ci/script/download_android_dependencies.sh full "$MANUAL_DEPS_DIR"
-
-      - name: Prepare Android dependencies
-        id: prepare-manual-deps
-        run: |
-          python3 ci/script/prepare_android_dependencies.py \
-            --profile full \
-            --archives "$MANUAL_DEPS_DIR" \
-            --repository "$GITHUB_WORKSPACE"
-
-          mkdir -p build-evidence
-          find "$MANUAL_DEPS_DIR" -type f -name '*.zip' -exec sha256sum {} \; > build-evidence/dependency-sha256.txt
-
-      # Save validated archives immediately, independently of later Android build results.
-      - name: Save prepared Android dependencies
-        if: steps.cache-manual-deps.outputs.cache-hit != 'true'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ env.MANUAL_DEPS_DIR }}
-          key: ${{ steps.cache-manual-deps.outputs.cache-primary-key }}
-
-      - name: Restore native ripgrep cache
-        id: cache-ripgrep
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            tools/native_ripgrep/target
-          key: native-ripgrep-arm64-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API_LEVEL }}-rust-${{ env.RUST_VERSION }}-${{ hashFiles('tools/native_ripgrep/Cargo.toml', 'tools/native_ripgrep/Cargo.lock', 'tools/native_ripgrep/**/*.rs', 'tools/native_ripgrep/build_native_ripgrep.ps1') }}
-
-      - name: Build native ripgrep
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_API_LEVEL}-clang"
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup target add --toolchain "$RUST_VERSION" aarch64-linux-android
-          cargo "+$RUST_VERSION" build \
-            --manifest-path tools/native_ripgrep/Cargo.toml \
-            --release \
-            --target aarch64-linux-android \
-            --locked
-          install -Dm755 \
-            tools/native_ripgrep/target/aarch64-linux-android/release/liboperit_ripgrep.so \
-            app/src/main/jniLibs/arm64-v8a/liboperit_ripgrep.so
-          test -s app/src/main/jniLibs/arm64-v8a/liboperit_ripgrep.so
-
-      - name: Save built native ripgrep
-        if: steps.cache-ripgrep.outputs.cache-hit != 'true'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            tools/native_ripgrep/target
-          key: ${{ steps.cache-ripgrep.outputs.cache-primary-key }}
-
-      - name: Install JavaScript dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install -g pnpm@10.34.5
-          npm ci --no-audit --no-fund
-          npm --prefix web-chat ci --no-audit --no-fund
-
-      - name: Build WebChat assets
-        run: |
-          npm run build:webchat
-
-      - name: Build bundled ToolPkg packages
-        run: |
-          npm run build:examples:github
-          python3 tools/example_packages/sync_example_packages.py --no-hot-reload
-
-      - name: Configure Android SDK
-        shell: bash
-        run: |
-          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Configure permanent signing and version
@@ -274,6 +122,8 @@ jobs:
               manifest_url = 'https://github.com/' + env['GITHUB_REPOSITORY'] + '/releases/download/' + previous['tag_name'] + '/update-manifest.json'
               with urllib.request.urlopen(manifest_url) as response:
                   manifest = json.load(response)
+              if manifest['signerSha256'].lower() != env['RPG_EXPECTED_SIGNER_SHA256']:
+                  raise ValueError('Previous release signing certificate differs from the permanent app identity')
               if code <= manifest['versionCode']:
                   raise ValueError('versionCode must strictly increase')
               if tuple(map(int,version.split('.'))) <= tuple(map(int,manifest['versionName'].split('.'))):
@@ -287,64 +137,16 @@ jobs:
               output.write(f'RPG_VERSION={version}\nRPG_CODE={code}\nRPG_TAG=rpg-v{version}\n')
           PY
 
-      - name: Compile and test RPG integration
+      - name: Run complete dedicated app tests, lint and optimized release build
         shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :rpg-core:test :app:testReleaseUnitTest --tests 'com.ai.assistance.operit.rpg.*' :app:lintVitalRelease \
-            -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" -PrpgOnlyTests=true \
-            -Pkotlin.compiler.execution.strategy=in-process \
-            '-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' \
-            --max-workers=2 --no-parallel --stacktrace --no-daemon
-
-      - name: Build complete signed APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :app:assembleRelease \
+          ./gradlew :rpg-core:test :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease \
             -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
-            -Pkotlin.compiler.execution.strategy=in-process \
-            '-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' \
             --max-workers=2 --no-parallel --stacktrace --no-daemon
 
-      # Source/model downloads remain useful when a later compile or test fails.
-      # These steps preserve caches only; the original Gradle failure still fails this job.
-      - name: Save downloaded Android CMake sources
-        if: always() && steps.cache-cmake.outputs.cache-primary-key != '' && steps.cache-cmake.outputs.cache-hit != 'true' && hashFiles('**/.cxx/operit_deps/*-src/CMakeLists.txt') != ''
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            **/.cxx/operit_deps/*-src
-          key: ${{ steps.cache-cmake.outputs.cache-primary-key }}
-
-      - name: Save native compilation artifacts
-        if: always() && steps.cache-native-products.outputs.cache-primary-key != '' && steps.cache-native-products.outputs.cache-hit != 'true' && hashFiles('**/build/intermediates/cxx/**/*.so') != ''
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            **/.cxx
-            **/build/intermediates/cxx
-          key: ${{ steps.cache-native-products.outputs.cache-primary-key }}
-
-      # Only Gradle's user caches are persisted: no project local.properties or signing files.
-      - name: Save Gradle dependency and build cache
-        if: always() && steps.cache-gradle.outputs.cache-primary-key != '' && steps.cache-gradle.outputs.cache-hit != 'true'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ steps.cache-gradle.outputs.cache-primary-key }}
-
-      - name: Save downloaded STT assets
-        if: always() && steps.cache-stt.outputs.cache-primary-key != '' && steps.cache-stt.outputs.cache-hit != 'true' && hashFiles('app/build/generated/stt-model-assets/**') != ''
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: app/build/generated/stt-model-assets
-          key: ${{ steps.cache-stt.outputs.cache-primary-key }}
-
-      - name: Verify APK and generate update manifest
+      - name: Verify optimized APK and update identity
         shell: bash
         run: |
           set -euo pipefail
@@ -355,41 +157,82 @@ jobs:
           test "$(apkanalyzer manifest application-id "$apk")" = 'io.github.cgm2026.operitrpg'
           test "$(apkanalyzer manifest version-code "$apk")" = "$RPG_CODE"
           test "$(apkanalyzer manifest version-name "$apk")" = "$RPG_VERSION"
+          test "$(apkanalyzer manifest target-sdk "$apk")" = '36'
           python3 - <<'PY'
-          import hashlib, json, os, re
+          import hashlib, json, os, re, zipfile
           from pathlib import Path
           version = os.environ['RPG_VERSION']
           apk = Path(f'release/operit-rpg-{version}.apk')
+          if not 0 < apk.stat().st_size < 50 * 1024**2:
+              raise ValueError('Dedicated APK must be smaller than 50 MiB')
           certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([a-fA-F0-9]+)', Path('release/signature.txt').read_text())[1].lower()
-          manifest = {'applicationId':'io.github.cgm2026.operitrpg', 'versionName':version, 'versionCode':int(os.environ['RPG_CODE']), 'apkUrl':f'https://github.com/CGM2026/OperitRPG/releases/download/rpg-v{version}/{apk.name}', 'sizeBytes':apk.stat().st_size, 'sha256':hashlib.file_digest(apk.open('rb'),'sha256').hexdigest(), 'signerSha256':certificate}
-          if not 0 < manifest['sizeBytes'] <= 2 * 1024**3: raise ValueError('APK exceeds updater size limit')
+          if certificate != os.environ['RPG_EXPECTED_SIGNER_SHA256']:
+              raise ValueError('APK certificate differs from the released 0.1.0 identity')
+          allowed_assets = {'assets/dexopt/baseline.prof', 'assets/dexopt/baseline.profm', 'assets/rainy-dock-v1.json', 'assets/plan.schema.json'}
+          with zipfile.ZipFile(apk) as archive:
+              for item in archive.infolist():
+                  if item.filename.startswith('lib/') or item.filename.endswith('.so'):
+                      raise ValueError('Native libraries are forbidden in dedicated APK: ' + item.filename)
+                  if item.filename.startswith('assets/') and not item.is_dir():
+                      if item.filename not in allowed_assets or item.file_size > 1024**2:
+                          raise ValueError('Unexpected or heavy APK asset: ' + item.filename)
+          with apk.open('rb') as stream:
+              sha = hashlib.file_digest(stream, 'sha256').hexdigest()
+          manifest = {'applicationId':'io.github.cgm2026.operitrpg', 'versionName':version, 'versionCode':int(os.environ['RPG_CODE']), 'apkUrl':f'https://github.com/CGM2026/OperitRPG/releases/download/rpg-v{version}/{apk.name}', 'sizeBytes':apk.stat().st_size, 'sha256':sha, 'signerSha256':certificate}
           Path('release/update-manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
-          Path('release/SHA256SUMS').write_text(manifest['sha256']+'  '+apk.name+'\n')
+          Path('release/SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
+          Path('release/source.json').write_text(json.dumps({'runId':int(os.environ['GITHUB_RUN_ID']), 'headSha':os.environ['GITHUB_SHA']}, indent=2)+'\n')
           PY
+          cp docs/TODO/rpg-release/RELEASE_NOTES.md release/RELEASE_NOTES.md
 
-      - name: Publish immutable release
+      - name: Upload exact signed release candidate
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: d20-release-candidate
+          path: release/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish release
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$RPG_TAG" release/*.apk release/update-manifest.json release/SHA256SUMS release/signature.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "雨夜跑团 $RPG_VERSION" --notes-file docs/TODO/rpg-release/RELEASE_NOTES.md --latest
+          gh release create "$RPG_TAG" release/*.apk release/update-manifest.json release/SHA256SUMS release/signature.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "二十面骰 $RPG_VERSION" \
+            --notes-file docs/TODO/rpg-release/RELEASE_NOTES.md --latest
 
-      - name: Upload build reports
+      - name: Save Gradle caches including failed builds
+        if: always() && steps.cache-gradle.outputs.cache-primary-key != ''
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.cache-gradle.outputs.cache-primary-key }}
+
+      - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: rpg-build-reports
+          name: d20-build-evidence
           path: |
             app/build/reports/**
+            app/build/test-results/**
             rpg-core/build/reports/**
+            rpg-core/build/test-results/**
             app/schemas/**
-            build-evidence/**
+            app/build/outputs/mapping/release/**
+            release/*.json
+            release/*.txt
+            release/SHA256SUMS
           if-no-files-found: warn
 
-      - name: Remove signing material
+      - name: Remove temporary signing material
         if: always()
         shell: bash
-        run: |
-          rm -f "$RUNNER_TEMP/rpg-release.p12" local.properties
+        run: rm -f "$RUNNER_TEMP/rpg-release.p12" local.properties
 
