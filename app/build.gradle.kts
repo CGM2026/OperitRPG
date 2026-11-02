@@ -588,6 +588,46 @@ kapt {
     }
 }
 
+// The release job exercises this fork's tests without compiling unrelated upstream test APIs.
+// This opt-in leaves normal Android builds and their complete test source sets unchanged.
+if (providers.gradleProperty("rpgOnlyTests").orNull == "true") {
+    val rpgTestSources = fileTree("src/test/java") {
+        include("com/ai/assistance/operit/rpg/**/*.kt")
+    }
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        if (name.matches(Regex("compile.*UnitTestKotlin"))) {
+            setSource(rpgTestSources)
+            setIncludes(listOf("**/rpg/**/*.kt"))
+            doFirst {
+                require(sources.files.isNotEmpty()) { "RPG unit test sources must not be empty" }
+                require(sources.files.all { it in rpgTestSources.files }) {
+                    "RPG-only compilation unexpectedly included unrelated test sources"
+                }
+                require(sources.files.any { it.name == "AppLoggerPrivateTest.kt" }) {
+                    "RPG release checks must include the real AppLogger integration test"
+                }
+            }
+        }
+    }
+    tasks.withType<Test>().configureEach {
+        if (name.matches(Regex("test.*UnitTest"))) {
+            filter {
+                includeTestsMatching("com.ai.assistance.operit.rpg.*")
+                isFailOnNoMatchingTests = true
+            }
+            doLast {
+                val reports = fileTree(layout.buildDirectory.dir("test-results/$name")) {
+                    include("TEST-*.xml")
+                }
+                require(reports.files.isNotEmpty()) { "RPG unit tests did not produce execution reports" }
+                require(reports.files.any { it.name.contains("AppLoggerPrivateTest") }) {
+                    "AppLogger private request integration test was not executed"
+                }
+            }
+        }
+    }
+}
+
 dependencies {
     implementation(project(":rpg-core"))
     implementation("com.github.jelmerk:hnswlib-core:1.2.1")

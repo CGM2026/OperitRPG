@@ -77,7 +77,18 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
+
+      - name: Restore Gradle dependency and build cache
+        id: cache-gradle
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: rpg-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-${{ github.run_id }}
+          restore-keys: |
+            rpg-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/**', 'gradle.properties') }}-
+            rpg-gradle-${{ runner.os }}-
 
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -263,7 +274,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           ./gradlew :rpg-core:test :app:testReleaseUnitTest --tests 'com.ai.assistance.operit.rpg.*' \
-            -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
+            -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" -PrpgOnlyTests=true \
             -Pkotlin.compiler.execution.strategy=in-process \
             '-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' \
             --max-workers=2 --no-parallel --stacktrace --no-daemon
@@ -287,6 +298,16 @@ jobs:
           path: |
             **/.cxx/operit_deps/*-src
           key: ${{ steps.cache-cmake.outputs.cache-primary-key }}
+
+      # Only Gradle's user caches are persisted: no project local.properties or signing files.
+      - name: Save Gradle dependency and build cache
+        if: always() && steps.cache-gradle.outputs.cache-primary-key != '' && steps.cache-gradle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.cache-gradle.outputs.cache-primary-key }}
 
       - name: Save downloaded STT assets
         if: always() && steps.cache-stt.outputs.cache-primary-key != '' && steps.cache-stt.outputs.cache-hit != 'true' && hashFiles('app/build/generated/stt-model-assets/**') != ''
@@ -324,7 +345,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$RPG_TAG" release/*.apk release/update-manifest.json release/SHA256SUMS release/signature.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "雨夜跑团 $RPG_VERSION" --generate-notes --latest
+          gh release create "$RPG_TAG" release/*.apk release/update-manifest.json release/SHA256SUMS release/signature.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "雨夜跑团 $RPG_VERSION" --notes-file docs/TODO/rpg-release/RELEASE_NOTES.md --latest
 
       - name: Upload build reports
         if: always()

@@ -3,6 +3,8 @@ package com.ai.assistance.operit.rpg.update
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -65,7 +67,7 @@ fun RpgUpdateButton(modifier: Modifier = Modifier) {
     if (visible) AlertDialog(
         onDismissRequest = { if (!busy) visible = false },
         title = { Text("雨夜跑团更新") },
-        text = { Column {
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(message)
             if (version.isNotEmpty() && path.isEmpty()) Text("下载时请保持当前页面；旋转屏幕后可安全重试。")
             if (version.isNotEmpty()) Text(notes.take(4000))

@@ -21,7 +21,9 @@ fork: https://github.com/CGM2026/OperitRPG
 
 依赖归档在解压验证成功后立即保存缓存，native ripgrep 在构建成功后立即保存缓存；后面的 Android 编译失败不会丢失这些缓存。CMake 已取得的源码和 STT 资产在文件存在时也会保存，包括构建失败场景。缓存使用明确的 restore/save 步骤，构建错误继续使 job 失败。CI 限制 Gradle 为两个 worker、关闭并行项目构建，Kotlin 与 Gradle 同进程，Gradle 堆上限 6 GiB。
 
-构建运行 rpg-core 测试和 app 中的 RPG release 单测并生成完整 release APK。app 的 `--tests` 只筛选执行对象，Gradle 仍会编译整个 app 单测源码集。发布前用 apksigner 检查签名，用 apkanalyzer 对照包名和版本，再生成 `update-manifest.json`、`SHA256SUMS` 与 `signature.txt`。上游其他 workflows 在本 fork 跳过，仍保留原定义供查阅。
+构建运行 rpg-core 测试和 app 中的 RPG release 单测并生成完整 release APK。发布 CI 显式设置 `-PrpgOnlyTests=true`，只编译 RPG 单测源码，并要求实际执行报告和 AppLogger 集成测试报告存在；生产源码和所有测试依赖保持完整。默认不带该属性时仍保留上游完整测试集。发布前用 apksigner 检查签名，用 apkanalyzer 对照包名和版本，再生成 `update-manifest.json`、`SHA256SUMS` 与 `signature.txt`。上游其他 workflows 在本 fork 跳过，仍保留原定义供查阅。
+
+发布说明来自同目录 `RELEASE_NOTES.md`，每次发布前维护此文件，不自动汇入上游提交历史。Gradle 用户缓存和 wrapper 采用独立 restore/save，即使编译失败也保存已下载依赖和可复用构建缓存；缓存不包含项目 local.properties 或签名目录。
 
 ## 应用更新接口
 
