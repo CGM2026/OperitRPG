@@ -106,7 +106,7 @@ class AgentBlackBoxTest {
             waitText("更正记事")
             fillFirstField("玩家补记：已在大厅进行一次调查。")
             click("确认更正")
-            waitText("已保存更正，原条目保留。")
+            // The modal sheet owns accessibility while open; the message is on the background page.
             waitText("玩家补记：已在大厅进行一次调查。")
             screenshot("agent-08-corrected-memory")
             readDb { db ->
@@ -118,6 +118,7 @@ class AgentBlackBoxTest {
                 }
             }
             device.pressBack(); device.waitForIdle()
+            waitText("已保存更正，原条目保留。")
             val expected = JSONObject().put("campaignId", id).put("title", title).put("event", recordedEvent)
                 .put("revision", 1).put("turnId", turn.getString("id")).put("modelFingerprint", "explicit-demo-v1")
                 .put("instrumentationPid", android.os.Process.myPid())
@@ -173,9 +174,21 @@ class AgentBlackBoxTest {
         waitText("旧版内置模组开团")
     }
     private fun fillFirstField(text: String) {
-        val field = requireNotNull(device.wait(Until.findObject(By.clazz("android.widget.EditText")), 15_000)) { "No editable field visible" }
-        field.click(); field.text = text
-        device.pressBack(); device.waitForIdle()
+        dismissKeyboardTutorial()
+        val selector = By.clazz("android.widget.EditText").pkg(context.packageName)
+        val field = requireNotNull(device.wait(Until.findObject(selector), 15_000)) { "No app editable field visible" }
+        field.click(); device.waitForIdle()
+        dismissKeyboardTutorial()
+        requireNotNull(device.wait(Until.findObject(selector), 15_000)).text = text
+        device.waitForIdle()
+        // Back only dismisses a positively identified IME. It must never navigate the app page.
+        if (device.hasObject(By.pkg("com.google.android.inputmethod.latin")) || device.hasObject(By.pkg("com.android.inputmethod.latin"))) {
+            device.pressBack(); device.waitForIdle()
+        }
+    }
+    private fun dismissKeyboardTutorial() {
+        val close = device.findObject(By.res("com.google.android.inputmethod.latin", "access_points_hint_close_button"))
+        if (close != null) { close.click(); device.waitForIdle() }
     }
     private fun awaitCampaign(title: String, predicate: (JSONObject) -> Boolean): JSONObject {
         val deadline = SystemClock.uptimeMillis() + 20_000

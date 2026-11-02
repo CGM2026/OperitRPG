@@ -13,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -30,6 +32,9 @@ private val agentColors = lightColorScheme(primary = Color(0xFF586B62), onPrimar
 @Composable
 fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, onModelSettings: () -> Unit) {
     val state by controller.state.collectAsState()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    fun dismissKeyboard() { focus.clearFocus(force = true); keyboard?.hide() }
     var page by rememberSaveable { mutableStateOf("home") }
     var panel by rememberSaveable { mutableStateOf<String?>(null) }
     var input by rememberSaveable { mutableStateOf("") }
@@ -95,12 +100,12 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                         Text("二十面骰 0.3 · 测试版", style = MaterialTheme.typography.bodySmall)
                     }
                     "library" -> AgentLibrary(state, controller, { importer.launch(arrayOf("application/zip", "application/octet-stream", "text/*")) }, onModelSettings)
-                    "create" -> AgentCreate(state, controller, { page = "library" }, onModelSettings)
+                    "create" -> AgentCreate(state, controller, { page = "library" }, onModelSettings, ::dismissKeyboard)
                     "play" -> if (play != null) {
                         Text("${play.location} · ${play.status}", Modifier.padding(horizontal = 28.dp), style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                             listOf("人物", "线索", "地点", "记事", "规则", "存档").forEach { name ->
-                                TextButton(onClick = { panel = name; if (name == "记事") controller.loadNotes() }, contentPadding = PaddingValues(4.dp)) { Text(name) }
+                                TextButton(onClick = { dismissKeyboard(); panel = name; if (name == "记事") controller.loadNotes() }, contentPadding = PaddingValues(4.dp)) { Text(name) }
                             }
                         }
                         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -131,8 +136,8 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                         }
                         if (state.models.none { it.fingerprint == play.modelFingerprint }) TextButton(onClick = { panel = "存档" }, Modifier.padding(horizontal = 28.dp)) { Text("请为本战役绑定本机模型") }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("你想做什么？") }, maxLines = 3, enabled = !state.busy, isError = input.length > 2000)
-                            Button(onClick = { controller.submit(input.trim()); input = "" }, enabled = !state.busy && play.canAct && input.isNotBlank() && input.length <= 2000 && state.models.any { it.fingerprint == play.modelFingerprint }, modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
+                            OutlinedTextField(input, { input = it }, Modifier.weight(1f).semantics { contentDescription = "行动输入" }, placeholder = { Text("你想做什么？") }, maxLines = 3, enabled = !state.busy, isError = input.length > 2000)
+                            Button(onClick = { dismissKeyboard(); controller.submit(input.trim()); input = "" }, enabled = !state.busy && play.canAct && input.isNotBlank() && input.length <= 2000 && state.models.any { it.fingerprint == play.modelFingerprint }, modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
                         }
                     }
                 }
@@ -157,7 +162,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                         "规则" -> {
                             var query by rememberSaveable { mutableStateOf("") }
                             OutlinedTextField(query, { query = it }, label = { Text("查询本团规则") }, modifier = Modifier.fillMaxWidth())
-                            Button(onClick = { controller.searchRules(query) }, enabled = !state.busy && query.isNotBlank()) { Text("查找出处") }
+                            Button(onClick = { dismissKeyboard(); controller.searchRules(query) }, enabled = !state.busy && query.isNotBlank()) { Text("查找出处") }
                             state.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("${evidence.source.anchor} · ${authorityText(evidence.source.authority)}") } }
                         }
                         "存档" -> {
@@ -184,7 +189,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                     OutlinedTextField(correction, { correction = it }, label = { Text("新内容") }, modifier = Modifier.fillMaxWidth())
                     Text("保留原条目与来源，更正不会修改生命、物品或骰点。", style = MaterialTheme.typography.bodySmall)
                 }
-            }, confirmButton = { TextButton(onClick = { controller.correctNote(original.id, correction); correcting = null }, enabled = correction.isNotBlank() && correction != original.text && !state.busy) { Text("确认更正") } }, dismissButton = { TextButton(onClick = { correcting = null }) { Text("取消") } }) }
+            }, confirmButton = { TextButton(onClick = { dismissKeyboard(); controller.correctNote(original.id, correction); correcting = null }, enabled = correction.isNotBlank() && correction != original.text && !state.busy) { Text("确认更正") } }, dismissButton = { TextButton(onClick = { correcting = null }) { Text("取消") } }) }
             state.preview?.let { preview -> AlertDialog(onDismissRequest = controller::dismissPreview, title = { Text(preview.title) }, text = { Text(preview.detail, Modifier.verticalScroll(rememberScrollState())) },
                 confirmButton = { TextButton(onClick = controller::commitImport, enabled = !state.busy) { Text(if (preview.module) "确认安装" else "保存参考资料") } }, dismissButton = { TextButton(onClick = controller::dismissPreview) { Text("取消") } }) }
             state.draft?.let { draft -> AgentDraftDialog(draft, state.busy, controller) }
@@ -196,7 +201,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
 @Composable private fun Detail(title: String, detail: String) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(detail) } }
 private fun authorityText(value: String) = when (value) { "temporary", "house_rule" -> "本团裁定"; "module_rule" -> "模组规则"; "module_custom" -> "模组自定"; "reference" -> "参考资料"; "source" -> "资料原文"; else -> value }
 
-@Composable private fun AgentCreate(state: AgentUiState, controller: AgentUiController, onLibrary: () -> Unit, onModels: () -> Unit) {
+@Composable private fun AgentCreate(state: AgentUiState, controller: AgentUiController, onLibrary: () -> Unit, onModels: () -> Unit, dismissKeyboard: () -> Unit) {
     var title by rememberSaveable { mutableStateOf("") }
     var moduleId by rememberSaveable { mutableStateOf<String?>(null) }
     var characterId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -218,7 +223,7 @@ private fun authorityText(value: String) = when (value) { "temporary", "house_ru
         Text("选择模型", style = MaterialTheme.typography.titleMedium)
         state.models.forEach { model -> OutlinedButton(onClick = { modelId = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (modelId == model.id) " ✓" else "") } }
         TextButton(onClick = onModels) { Text("模型配置") }
-        Button(onClick = { controller.create(title.trim(), requireNotNull(module).ref, requireNotNull(characterId), allow, requireNotNull(modelId)) },
+        Button(onClick = { dismissKeyboard(); controller.create(title.trim(), requireNotNull(module).ref, requireNotNull(characterId), allow, requireNotNull(modelId)) },
             enabled = !state.busy && title.isNotBlank() && title.length <= 100 && module != null && characterId != null && state.models.any { it.id == modelId }, modifier = Modifier.fillMaxWidth()) { Text("开始战役") }
     }
 }
