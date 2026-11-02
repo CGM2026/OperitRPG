@@ -4,7 +4,7 @@
 
 应用支持 Android 8.0 及以上系统，使用黑体、低饱和配色和 28dp 页面留白。旧《雨夜旧码头》战役继续使用原引擎和数据库；新长团使用独立数据库及原创通用百分骰适配器，不是完整 CoC/D&D 规则实现。
 
-0.2.0 安装包为 **1.76 MB**，较 0.1.0 的 404.67 MB 缩小 **99.56%**。74 项自动测试及 Android 模拟器同签名覆盖升级验收通过，详情见[发布验收报告与实拍截图](docs/TODO/dedicated_d20_v02/RELEASE_ACCEPTANCE.md)。
+0.3.0 测试版安装包为 **1.98 MB**。108 项 JVM 测试通过，Android 8 与 Android 16 模拟器各通过 8 项数据测试及旧存档覆盖升级、新长团界面、独立进程恢复验证。详情见[0.3 测试报告与截图](docs/TODO/rpg_agent_v03/RELEASE_ACCEPTANCE.md)。
 
 ## 安装与更新
 
@@ -28,6 +28,7 @@ AI 解释行动并生成叙述；程序执行骰点、生命、资源、时间�
 
 - [专用版范围和实现进度](docs/TODO/dedicated_d20_v02/index.md)
 - [0.3 长团设计与实现](docs/TODO/rpg_agent_v03/index.md)
+- [0.3 测试报告与安装验收](docs/TODO/rpg_agent_v03/RELEASE_ACCEPTANCE.md)
 - [0.3 手机界面与验收流程](docs/TODO/rpg_agent_v03/05-phone-ui.md)
 - [0.3 运行时保证与实际限制](rpg-agent/README.md)
 - [手机验收指南](docs/TODO/rpg_prototype_v01/ACCEPTANCE.md)
