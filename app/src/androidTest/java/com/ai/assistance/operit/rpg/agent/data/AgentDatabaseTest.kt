@@ -63,13 +63,19 @@ class AgentDatabaseTest {
  }
  @Test fun format2RoundTripPreservesDependenciesAndRequiresModelRebind(){
   RoomMemoryRepository(db).save(MemoryItem("note","a","约定",emptyList(),0,0,Visibility(Audience.PUBLIC),"ACTIVE"))
+  val corrected=RoomMemoryRepository(db).correct(RoleContext("a",Audience.PUBLIC),"note","修订约定")
+  val docs=ReferenceDocumentService(db);val document=docs.importText("旅行补充","绳索桥边的守则",Visibility(Audience.PUBLIC));docs.attach("a",document)
   val service=AgentBackupService(db,context.cacheDir);val out=ByteArrayOutputStream();service.export("a",out)
   assertEquals("a",service.preview(ByteArrayInputStream(out.toByteArray())).title)
   val restored=service.importBackup(ByteArrayInputStream(out.toByteArray()))
   assertNotEquals("a",restored.campaignId)
   val c=store.loadCampaign(restored.campaignId)!!
   assertEquals("",c.modelFingerprint);assertEquals(store.loadCampaign("a")!!.world,c.world)
-  assertEquals("约定",RoomMemoryRepository(db).recent(RoleContext(c.id,Audience.PUBLIC),5).single().text)
+  val notes=RoomMemoryRepository(db);val restoredNote=notes.recent(RoleContext(c.id,Audience.PUBLIC),5).single()
+  assertEquals("修订约定",restoredNote.text)
+  assertEquals(listOf("修订约定","约定"),notes.correctionHistory(RoleContext(c.id,Audience.PUBLIC),restoredNote.id).map{it.text})
+  assertEquals(1,db.dao().corrections(c.id,0,100).size)
+  assertEquals("绳索桥边的守则",ReferenceDocumentService(db).read(db.dao().attachedDocuments(c.id,0,100).single().id))
   assertEquals(module,RoomModuleCatalog(db).get(c.module))
  }
  @Test fun longHistoryIsPagedAndBadArchiveLeavesNoCampaign(){
@@ -104,5 +110,46 @@ class AgentDatabaseTest {
   assertTrue("Recall@5=$found/$answerable",found.toDouble()/answerable>=0.90)
   // Installing version 2 cannot change an already bound version 1 campaign.
   assertEquals("检定使用百分骰",repository.search(RoleContext("a",Audience.PUBLIC),campaign("a").module,"test:check",5).first().quote)
+ }
+ @Test fun publicQuoteDoesNotPublishOtherTextInTheSameSource(){
+  val original=module;val text="检定使用百分骰\n主持秘密：紫晶暗号藏在王座。";val sourceId="module/sources/rules.md"
+  val evidence=original.rules.evidence.single().copy(source=original.rules.evidence.single().source.copy(sourceHash=sha256(text)))
+  val base=original.copy(manifest=original.manifest.copy(version="3.0.0"),sources=mapOf(sourceId to text),rules=original.rules.copy(evidence=listOf(evidence)))
+  val files=base.sources+mapOf("module/world.json" to encode(base.world),"module/rules.json" to encode(base.rules))
+  val manifest=base.manifest.copy(files=files.toSortedMap().map{FileDigest(it.key,it.value.toByteArray().size.toLong(),sha256(it.value))})
+  val m=base.copy(manifest=manifest,contentHash=sha256(StrictJson.json.encodeToString(manifest)),originalFiles=files)
+  RoomModuleCatalog(db).install(m)
+  val c=campaign("mixed").copy(module=VersionRef("test","3.0.0",m.contentHash),rules=VersionRef("generic-d100-v1","1",m.contentHash));store.createCampaign(c)
+  val repo=RoomRuleRepository(db)
+  assertTrue(repo.search(RoleContext(c.id,Audience.PUBLIC),c.module,"紫晶暗号",5).isEmpty())
+  assertNull(repo.read(RoleContext(c.id,Audience.PUBLIC),c.module,sourceId,"offset:0"))
+  assertTrue(repo.search(RoleContext(c.id,Audience.GM),c.module,"紫晶暗号",5).any{it.quote.contains("紫晶暗号")})
+  assertEquals(evidence,repo.search(RoleContext(c.id,Audience.PUBLIC),c.module,"test:check",5).single())
+ }
+ @Test fun conversationMemorySurvivesReopenCorrectionAndBackupWithExactTurnSource(){
+  val originalWorld=store.loadCampaign("a")!!.world
+  val player="我叫青禾，答应船工明天归还罗盘。"+"长文".repeat(5000)
+  val narration="船工回应：我记住你的承诺了。"+"回应".repeat(6000)
+  val turn=Turn("conversation-turn","a",1,"conversation-client",player,0,TurnPhase.COMPLETE,narration=narration)
+  store.transaction("a"){tx->tx.saveCampaign(tx.session.campaign.copy(nextTurnOrdinal=2));tx.saveTurn(turn)}
+  db.close();open()
+  val memory=RoomMemoryRepository(db)
+  val item=memory.search(RoleContext("a",Audience.PUBLIC),"青禾罗盘",emptyList(),5).single()
+  assertEquals("CONVERSATION",item.kind);assertEquals(turn.id,item.sourceTurnId)
+  assertTrue(item.text.contains("对话记录，不代表世界状态"));assertTrue(item.text.length<=12000)
+  assertEquals(player,store.loadTurn("a",item.sourceTurnId!!)!!.playerText)
+  assertEquals(narration,store.loadTurn("a",item.sourceTurnId!!)!!.narration)
+  val replacement=memory.correct(RoleContext("a",Audience.PUBLIC),item.id,"玩家更正：名字是青禾，归还日期是后天。（对话记录，不代表世界状态）")
+  assertEquals(turn.id,replacement.sourceTurnId);assertEquals("CONVERSATION",replacement.kind)
+  val out=ByteArrayOutputStream();val service=AgentBackupService(db,context.cacheDir);service.export("a",out)
+  val restored=service.importBackup(ByteArrayInputStream(out.toByteArray()))
+  val restoredNote=memory.search(RoleContext(restored.campaignId,Audience.PUBLIC),"青禾后天",emptyList(),5).single()
+  assertEquals("CONVERSATION",restoredNote.kind);assertNotEquals(turn.id,restoredNote.sourceTurnId)
+  val source=store.loadTurn(restored.campaignId,restoredNote.sourceTurnId!!)!!
+  assertEquals(player,source.playerText);assertEquals(narration,source.narration)
+  assertEquals(2,memory.correctionHistory(RoleContext(restored.campaignId,Audience.PUBLIC),restoredNote.id).size)
+  assertEquals(originalWorld,store.loadCampaign("a")!!.world)
+  assertEquals(originalWorld,store.loadCampaign(restored.campaignId)!!.world)
+  assertTrue(memory.search(RoleContext("b",Audience.PUBLIC),"青禾",emptyList(),5).isEmpty())
  }
 }

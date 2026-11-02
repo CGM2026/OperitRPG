@@ -1,41 +1,11 @@
 package com.ai.assistance.operit.rpg.agent.data
 
 import com.ai.assistance.operit.rpg.agent.contract.*
-import java.security.MessageDigest
 import java.util.UUID
 import com.ai.assistance.operit.rpg.agent.rules.GenericD100
 import com.ai.assistance.operit.rpg.agent.tools.StrictJson
 import kotlinx.serialization.encodeToString
 
-/** FTS receives only quoted generated terms, never user-provided MATCH syntax. */
-object ChineseSearch {
- fun terms(text:String):List<String> {
-  val out=linkedSetOf<String>()
-  Regex("[\\p{IsHan}]+|[a-zA-Z0-9_:-]+").findAll(text.lowercase()).forEach { match ->
-   val s=match.value
-   if(s.first().code in 0x3400..0x9fff) { s.forEach{out+=it.toString()}; s.windowed(2).forEach{out+=it} }
-   else out+=s
-  }
-  return out.take(256)
- }
- fun index(text:String)=terms(text).joinToString(" ")
- fun query(text:String):String {
-  val all=terms(text);val phrases=all.filter{it.length>1}
-  return (if(phrases.isEmpty())all else phrases).take(64).joinToString(" OR "){"\"${it.replace("\"","")}\""}.ifEmpty { "\"__empty_query__\"" }
- }
-}
-internal fun sha256(text:String)=MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
-/** Keep both UTF-8 storage parts and searchable quotes below Android cursor limits. */
-internal fun textParts(text:String,maxBytes:Int=60*1024):List<String> {
- val parts=mutableListOf<String>(); val current=StringBuilder(); var bytes=0; var offset=0
- while(offset<text.length) {
-  val cp=text.codePointAt(offset); val unit=String(Character.toChars(cp)); val size=unit.toByteArray(Charsets.UTF_8).size
-  if(bytes+size>maxBytes) { parts+=current.toString(); current.setLength(0); bytes=0 }
-  current.append(unit); bytes+=size; offset+=Character.charCount(cp)
- }
- if(current.isNotEmpty() || parts.isEmpty()) parts+=current.toString()
- return parts
-}
 internal fun RoleContext.canSee(v:Visibility)=audience==Audience.GM || v.audience==Audience.PUBLIC || (audience==v.audience && subjectId!=null && subjectId==v.subjectId)
 
 class RoomModuleCatalog(private val db:AgentDatabase):ModuleCatalog {
@@ -64,9 +34,8 @@ class RoomModuleCatalog(private val db:AgentDatabase):ModuleCatalog {
   // Index raw paragraphs too; they remain evidence only and never become executable effects.
   module.sources.forEach { (source,text)->
    text.chunked(700).forEachIndexed { i,quote->
-    val evidence=module.rules.evidence.filter{it.source.sourceId==source}
-    // A source without an explicit public scope is GM-only, avoiding accidental secret publication.
-    val scope=if(evidence.isNotEmpty() && evidence.all{it.visibility.audience==Audience.PUBLIC}) Visibility(Audience.PUBLIC) else Visibility(Audience.GM)
+    // Public evidence permits the quoted span only. A mixed source has no document-level grant.
+    val scope=Visibility(Audience.GM)
     val id="${m.moduleId}:${m.version}:source:$source:$i"
     db.dao().insertRule(RuleChunkRow(id,m.moduleId,m.version,module.contentHash,source,sha256(text),"offset:${i*700}","", "source",scope.audience.name,scope.subjectId,quote,i*700))
     db.dao().insertRuleFts(RuleFtsRow(chunkId=id,tokens=ChineseSearch.index(quote)))
@@ -119,6 +88,9 @@ class RoomMemoryRepository(private val db:AgentDatabase):MemoryRepository {
   require(item.toSeq<=c.lastEventSeq) { "INVALID_MEMORY_SOURCE" }
   require(item.status in setOf("ACTIVE","SUPERSEDED","INVALID"))
   require(com.ai.assistance.operit.rpg.agent.rules.validVisibility(item.visibility))
+  require(item.kind in setOf("EVENT","CONVERSATION","NOTE"))
+  item.sourceTurnId?.let{require(db.dao().turn(item.campaignId,it)!=null){"INVALID_MEMORY_TURN_SOURCE"}}
+  require(item.kind!="CONVERSATION" || item.sourceTurnId!=null){"CONVERSATION_SOURCE_REQUIRED"}
   require(db.dao().memory(item.campaignId,item.id)==null) { "MEMORY_IMMUTABLE" }
   db.dao().insertMemory(item.row())
   if(item.status=="ACTIVE") db.dao().insertMemoryFts(MemoryFtsRow(memoryId=item.id,tokens=ChineseSearch.index(item.text+" "+item.entityIds.joinToString(" "))))
@@ -130,11 +102,21 @@ class RoomMemoryRepository(private val db:AgentDatabase):MemoryRepository {
   val replacement=old.item().copy(id=UUID.randomUUID().toString(),text=newText,supersedesId=old.id)
   db.dao().updateMemory(old.copy(status="SUPERSEDED")); db.dao().deleteMemoryFts(old.id)
   save(replacement); db.dao().invalidateSummaries(old.campaignId,old.fromSeq,old.toSeq)
+  db.dao().interruptCorrectedJobs(old.campaignId,old.fromSeq,old.toSeq)
   db.dao().insertCorrection(CorrectionRow(UUID.randomUUID().toString(),old.campaignId,old.id,replacement.id,db.dao().campaign(old.campaignId)!!.revision))
   replacement
  }
- internal fun MemoryRow.item()=MemoryItem(id,campaignId,text,decode(entitiesJson),fromSeq,toSeq,Visibility(Audience.valueOf(audience),subjectId),status,supersedesId)
- private fun MemoryItem.row()=MemoryRow(id,campaignId,text,encode(entityIds),fromSeq,toSeq,visibility.audience.name,visibility.subjectId,status,supersedesId)
+ fun correctionHistory(role:RoleContext,id:String):List<MemoryItem> =db.atomic {
+  val out=mutableListOf<MemoryItem>();val seen=mutableSetOf<String>();var current:String?=id
+  while(current!=null && seen.add(current) && out.size<256) {
+   val row=db.dao().memory(role.campaignId,current)?:break
+   if(!role.canSee(Visibility(Audience.valueOf(row.audience),row.subjectId)))break
+   out+=row.item();current=row.supersedesId
+  }
+  out
+ }
+ internal fun MemoryRow.item()=MemoryItem(id,campaignId,text,decode(entitiesJson),fromSeq,toSeq,Visibility(Audience.valueOf(audience),subjectId),status,supersedesId,sourceTurnId,kind)
+ private fun MemoryItem.row()=MemoryRow(id,campaignId,text,encode(entityIds),fromSeq,toSeq,visibility.audience.name,visibility.subjectId,status,supersedesId,sourceTurnId,kind)
 }
 
 /** Local persistence for explicitly enabled paid summary tasks. This service never calls a model. */

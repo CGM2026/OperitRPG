@@ -71,7 +71,15 @@ class ToolRegistry(private val rules:RuleRepository,private val memories:MemoryR
                     }
                 }; JsonArray(entities).toString()
             }
-            "npc.read" -> { keys(setOf("npcId")); val id=str("npcId"); val npc=c.world.npcs.singleOrNull { it.id==id }; require(npc!=null) { "ENTITY_UNAVAILABLE" }; if(role.audience==Audience.GM || role.audience==Audience.NPC && role.subjectId==id) Json.encodeToString(npc) else { require(npc.locationId==c.world.locationId) { "ENTITY_UNAVAILABLE" }; Json.encodeToString(PublicNpc(npc.id,npc.name,npc.locationId,npc.status)) } }
+            "npc.read" -> {
+                keys(setOf("npcId")); val id=str("npcId"); val npc=c.world.npcs.singleOrNull { it.id==id }; require(npc!=null) { "ENTITY_UNAVAILABLE" }
+                if(role.audience==Audience.GM || role.audience==Audience.NPC && role.subjectId==id) {
+                    val knowledge=c.world.knowledge.filter { it.knowerId==id }
+                    val knownIds=knowledge.map { it.factId }.toSet()
+                    val facts=c.world.facts.filter { it.id in knownIds || it.visibility.audience==Audience.NPC && it.visibility.subjectId==id }
+                    buildJsonObject { put("npc",Json.encodeToJsonElement(npc)); put("knowledge",Json.encodeToJsonElement(knowledge)); put("knownFacts",Json.encodeToJsonElement(facts)) }.toString()
+                } else { require(npc.locationId==c.world.locationId) { "ENTITY_UNAVAILABLE" }; Json.encodeToString(PublicNpc(npc.id,npc.name,npc.locationId,npc.status)) }
+            }
             else -> error("UNKNOWN_TOOL")
         }
         require(output.toByteArray().size<=8192) { "TOOL_OUTPUT_BUDGET" }

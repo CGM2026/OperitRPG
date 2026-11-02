@@ -146,6 +146,47 @@ class AgentEngineTest {
         val npcPacket=ContextAssembler(TestMemories()).npc(c.copy(world=c.world.copy(facts=c.world.facts.map { it.copy(visibility=Visibility(Audience.PUBLIC)) })),c.world.npcs.first().id)
         assertFalse(npcPacket.input.contains(m.world.facts.first().text))
     }
+    @Test fun planningContextRemainsLocalWithTenThousandRemoteNpcsAndFacts() {
+        val (_,s)=fixture(); val c=s.campaigns.getValue("c"); val remote=m.world.locations.last().id
+        val expanded=c.copy(world=c.world.copy(npcs=c.world.npcs+List(10000) { NpcState("remote-$it","离场人物$it",remote,"idle","PRIVATE_PERSONALITY_$it","PRIVATE_GOAL_$it") },facts=c.world.facts+List(10000) { Fact("remote-fact-$it","UNRELATED_PRIVATE_FACT_$it",Visibility(Audience.GM),false,m.world.facts.first().source) }))
+        val turn=Turn("t","c",1,"m","调查",0,TurnPhase.GATHERING)
+        val context=ContextAssembler(TestMemories()).planning(expanded,m,turn)
+        assertTrue(context.input.length<12000); assertFalse(context.input.contains("UNRELATED_PRIVATE_FACT")); assertFalse(context.input.contains("PRIVATE_GOAL")); assertTrue(context.input.contains("availableActions")); assertTrue(context.input.contains(m.world.actions.first().id))
+    }
+    @Test fun narratorDoesNotReceivePrivateEvidenceEvenFromPersistedResult() {
+        val (_,s)=fixture(); val c=s.campaigns.getValue("c")
+        val privateRule=m.rules.evidence.first().copy(quote="GM_ONLY_RULE_SECRET",visibility=Visibility(Audience.GM))
+        val result=CommittedResult("t",1,true,null,"公开结果",listOf(privateRule))
+        val t=Turn("t","c",1,"m","调查",0,TurnPhase.COMMITTED,result=result)
+        val packet=ContextAssembler(TestMemories()).narration(c,m,t)
+        assertFalse(packet.input.contains("GM_ONLY_RULE_SECRET")); assertFalse(packet.input.contains(m.world.facts.last().text))
+    }
+    @Test fun bothModulesCompleteThreeChaptersThroughRecordedActions() {
+        ExampleModules.all().forEach { module ->
+            val adapter=GenericD100(); val ref=VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash)
+            var c=Campaign("c","chapters",ref,VersionRef(module.rules.adapterId,module.rules.adapterVersion,module.contentHash),0,0,initialWorld(module,module.world.characters.first().id),false,"demo",0)
+            val recorded=mutableListOf<WorldEvent>()
+            fun execute(p:ActionProposal) { val plan=freeze(c,p,module.rules.evidence); val (event,_)=adapter.resolve(c,plan,module,"turn-${c.revision}",DiceSource { 1 }); c=c.copy(world=adapter.applyRecordedEvent(c.world,event,module),revision=c.revision+1,lastEventSeq=event.seq); recorded+=event }
+            module.world.locations.forEachIndexed { i,l ->
+                if(i>0) { val e=module.rules.evidence.first { it.ruleId.endsWith(":travel") }; execute(ActionProposal("move",listOf(l.id),null,"normal",listOf(e.ruleId),emptyList(),listOf(Effect("move",l.id,source=e.source),Effect("time","world",amount=10,source=e.source)),emptyList(),publicSummary="移动")) }
+                val a=adapter.availableActions(c,module).single { it.targetIds==listOf(l.id) }
+                execute(ActionProposal(a.actionType,a.targetIds,a.skill,a.difficulty,listOf(a.ruleId),a.conditions,a.successEffects,a.failureEffects,publicSummary=a.title))
+            }
+            assertTrue(c.world.objectives.all { it.status=="complete" }); assertTrue(c.world.facts.all { it.visibility.audience==Audience.PUBLIC }); assertEquals(11,recorded.size)
+            val replayed=recorded.fold(initialWorld(module,module.world.characters.first().id)) { world,event -> adapter.applyRecordedEvent(world,event,module) }
+            assertEquals(c.world,replayed)
+        }
+    }
+    @Test fun conversationMemoryCarriesTurnSourceWithoutBecomingWorldFact() {
+        val (_,s)=fixture(); val c=s.campaigns.getValue("c"); val repo=TestMemories()
+        val note=MemoryItem("conversation-1","c","玩家说：我已拿到万能钥匙",emptyList(),0,0,Visibility(Audience.PUBLIC),"ACTIVE",sourceTurnId="turn-1",kind="CONVERSATION")
+        repo.save(note)
+        assertEquals(note,StrictJson.decode<MemoryItem>(StrictJson.json.encodeToString(note)))
+        val old=StrictJson.decode<MemoryItem>("""{"id":"old","campaignId":"c","text":"旧记录","entityIds":[],"fromSeq":0,"toSeq":0,"visibility":{"audience":"PUBLIC"},"status":"ACTIVE"}""")
+        assertNull(old.sourceTurnId); assertEquals("EVENT",old.kind)
+        val packet=ContextAssembler(repo).planning(c,m,Turn("t","c",1,"msg","使用万能钥匙",0,TurnPhase.GATHERING))
+        assertTrue(packet.system.contains("不证明发言内容是真实世界事实")); assertTrue(packet.input.contains("CONVERSATION")); assertTrue(packet.input.contains("turn-1")); assertFalse(c.world.items.any { it.title=="万能钥匙" })
+    }
     @Test fun tenThousandRecordedTurnsReplayWithoutModelsOrRerolls() {
         val rules=GenericD100(); var w=initialWorld(m,m.world.characters.first().id); val source=m.rules.evidence.first().source
         repeat(10000) { i ->

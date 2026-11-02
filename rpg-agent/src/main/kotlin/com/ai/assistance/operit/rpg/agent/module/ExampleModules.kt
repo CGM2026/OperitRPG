@@ -37,10 +37,12 @@ object ExampleModules {
         val npcs=names.mapIndexed { i,n -> NpcState("$id:npc-$i",n,loc(i/2),"idle",if(i%2==0)"谨慎，重视承诺" else "直率，关注实际困难",when(i%3) { 0 -> "让本地人安全过冬"; 1 -> "查清误会并获得信任"; else -> "完成手头工作" }) }
         val factTexts=if(id=="winter-post")listOf("大厅的值班簿缺少最后一页。","马厩两串蹄印分别通向信塔和山路。","旧信塔留着写有药棚地址的回信。","岔路标记显示驿使主动离开了大道。","药棚有给受伤外乡人的包扎布。",truth) else listOf("巡护日志记载风标与水位同日异常。","风标台缺失的零件没有被破坏。","牧民营地最近为修井借过金属件。","赤石沟的新水痕来自测站方向。","旧测站排水槽被砂石堵住。",truth)
         val facts=factTexts.mapIndexed { i,t -> Fact("$id:fact-$i",t,Visibility(Audience.GM),i==5,settingSource) }
-        val objectives=goals.mapIndexed { i,g -> Objective("$id:objective-$i",g,i+1,"active") }
+        val objectives=goals.mapIndexed { i,g -> Objective("$id:objective-$i",g,i+1,if(i==0)"active" else "pending") }
         val actions=locations.mapIndexed { i,l ->
             val time=Effect("time","world",amount=10,source=clues)
-            ActionDefinition("$id:investigate-$i","调查${l.title}","investigate",listOf(l.id),"调查","normal","$id:clues",listOf(Condition("location",targetId=l.id)),listOf(Effect("reveal_fact",facts[i].id,source=clues),time),listOf(time))
+            val conditions=listOf(Condition("location",targetId=l.id))+if(i>0)listOf(Condition("fact_known",targetId=facts[i-1].id)) else emptyList()
+            val milestones=if(i%2==1)listOf(Effect("objective",objectives[i/2].id,value="complete",source=clues))+if(i<5)listOf(Effect("objective",objectives[i/2+1].id,value="active",source=clues)) else emptyList() else emptyList()
+            ActionDefinition("$id:investigate-$i","调查${l.title}","investigate",listOf(l.id),"调查","normal","$id:clues",conditions,listOf(Effect("reveal_fact",facts[i].id,source=clues),time)+milestones,listOf(time))
         }
         val world=ModuleWorld(loc(0),listOf(CharacterTemplate("$id:traveler","巡行者",mapOf("调查" to 65,"交涉" to 60,"体能" to 55),mapOf("生命" to 10,"补给" to 8))),locations,npcs,listOf(Item("$id:lantern","提灯","player",1),Item("$id:kit","急救包","player",1)),facts,objectives,actions,GenerationPolicy(setOf("npc","location_detail"),12,setOf(facts.last().id)))
         val rules=ModuleRules("generic-d100-v1","1",setOf("调查","交涉","体能"),mapOf("生命" to ResourceBounds(0,10),"补给" to ResourceBounds(0,20)),mapOf("normal" to 0,"hard" to -20,"easy" to 20),GenericD100.effects,evidence,"分钟")

@@ -15,7 +15,7 @@ class AgentDraftService(private val port: TextModelPort) {
     suspend fun organize(documents: List<DraftDocument>, callLimit: Int = 1): String {
         require(callLimit in 1..4 && documents.isNotEmpty()) { "请选择资料与调用预算" }
         require(documents.map { it.id }.distinct().size == documents.size)
-        require(documents.sumOf { it.text.length + it.title.length } <= 6000) { "一次整理最多 6000 字，请先选择或拆分需要整理的资料" }
+        require(documents.sumOf { it.text.length + it.title.length } <= 6000) { "DRAFT_SOURCE_TOO_LARGE" }
         val example = ExampleModules.all().first()
         val w = example.world
         val template = ModuleDraft(example.manifest.moduleId, "1.0.0", "替换为资料标题", "用户导入", "只写公开简介",

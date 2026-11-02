@@ -67,7 +67,7 @@ class GenericD100 : RuleAdapter {
             if(it.source.authority=="temporary_ruling") require(proposal.temporaryRuling && proposal.requiresConfirmation) { "RULING_CONFIRMATION_REQUIRED" }
         }
         (proposal.successEffects + proposal.failureEffects).filter { it.type=="reveal_fact" && w.facts.any { fact -> fact.id==it.targetId && fact.locked } }.forEach { effect ->
-            require(module.world.actions.any { a -> effect in a.successEffects && a.conditions.all { condition(it,w) } && a.targetIds.all { it in proposal.targetIds } }) { "LOCKED_FACT" }
+            require(module.world.actions.any { a -> effect in a.successEffects && proposal.conditions.containsAll(a.conditions) && a.targetIds.all { it in proposal.targetIds } }) { "LOCKED_FACT" }
         }
         require(proposal.creations.isEmpty() || campaign.allowGeneration) { "GENERATION_DISABLED" }
         require(w.generated.size + proposal.creations.size <= module.world.policy.maxEntities) { "GENERATION_LIMIT" }
@@ -102,7 +102,7 @@ class GenericD100 : RuleAdapter {
     }
     private fun validateEffect(e:Effect,w:WorldState,m:ValidatedModule) {
         require(e.type in m.rules.allowedEffects && e.type in effects) { "UNKNOWN_EFFECT" }
-        require(e.source.authority in setOf("module_rule","module_custom","temporary_ruling","generated")) { "INVALID_EFFECT_SOURCE" }
+        require(e.source.authority in setOf("module_rule","module_custom","temporary_ruling")) { "INVALID_EFFECT_SOURCE" }
         if(e.source.authority != "temporary_ruling" && e.source.authority != "generated") require(m.rules.evidence.any { it.source == e.source }) { "INVALID_EFFECT_SOURCE" }
         when(e.type) {
             "move" -> require(m.world.locations.any { it.id == e.targetId } && m.world.locations.single { it.id == w.locationId }.exits.contains(e.targetId)) { "UNREACHABLE" }

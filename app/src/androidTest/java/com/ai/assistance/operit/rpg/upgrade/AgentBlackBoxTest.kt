@@ -13,6 +13,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -47,8 +48,10 @@ class AgentBlackBoxTest {
             fillFirstField(title)
             scrollTo("雪线驿站失踪案 · 1.0.0")
             click("雪线驿站失踪案 · 1.0.0")
-            scrollTo("巡行者")
-            click("巡行者")
+            val character = device.findObject(By.desc("选择角色 · 巡行者"))
+            if (character == null) scrollToContains("巡行者")
+            requireNotNull(device.wait(Until.findObject(By.desc("选择角色 · 巡行者")), 15_000)).click()
+            device.waitForIdle()
             scrollTo("离线流程演示 · 固定脚本，不调用云端模型")
             click("离线流程演示 · 固定脚本，不调用云端模型")
             scrollTo("开始战役")
@@ -63,7 +66,11 @@ class AgentBlackBoxTest {
             val turn = latestTurn(id)
             assertEquals("COMPLETE", turn.getString("phase"))
             assertEquals("explicit-demo-v1", campaign.getString("modelFingerprint"))
-            assertEquals("A real tool loop must execute two distinct reads", 2, turn.getJSONArray("tools").length())
+            val toolIds = readDb { db -> db.rawQuery("SELECT invocationId FROM tool_result WHERE turnId=? ORDER BY ordinal", arrayOf(turn.getString("id"))).use { cursor ->
+                val ids = mutableListOf<String>(); while (cursor.moveToNext()) ids += cursor.getString(0); ids
+            } }
+            assertEquals("A real tool loop must persist two distinct reads", 2, toolIds.size)
+            assertEquals("Tool invocations must have separate persisted IDs", 2, toolIds.distinct().size)
             assertEquals(1L, campaign.getLong("lastEventSeq"))
             val recordedEvent = event(id)
             waitContains("行动已经记录")
@@ -78,10 +85,10 @@ class AgentBlackBoxTest {
             click("规则")
             fillFirstField("行动检定")
             click("查找出处")
-            val evidence = requireNotNull(device.wait(Until.findObject(By.textContains("winter-post:check")), 15_000))
+            val evidence = requireNotNull(device.wait(Until.findObject(By.text("行动检定 · 模组规则")), 15_000))
             evidence.click()
             waitContains("掷出1至100")
-            waitText("module/sources/rules.md · 行动检定")
+            waitText("rules.md · 行动检定")
             screenshot("agent-06-rule-source")
             device.pressBack(); device.waitForIdle()
             device.pressBack(); device.waitForIdle()
@@ -90,6 +97,11 @@ class AgentBlackBoxTest {
             waitContains("来源事件 1")
             waitText("更正")
             screenshot("agent-07-memory-source")
+            click("查看来源")
+            waitText("记事来源")
+            waitContains("调查这里")
+            screenshot("agent-07b-memory-original-record")
+            device.pressBack(); device.waitForIdle()
             click("更正")
             waitText("更正记事")
             fillFirstField("玩家补记：已在大厅进行一次调查。")
@@ -108,6 +120,7 @@ class AgentBlackBoxTest {
             device.pressBack(); device.waitForIdle()
             val expected = JSONObject().put("campaignId", id).put("title", title).put("event", recordedEvent)
                 .put("revision", 1).put("turnId", turn.getString("id")).put("modelFingerprint", "explicit-demo-v1")
+                .put("instrumentationPid", android.os.Process.myPid())
             expectedFile.writeText(expected.toString())
             launch()
             waitText(title)
@@ -130,6 +143,7 @@ class AgentBlackBoxTest {
     @Test fun persistedAgentCampaignSurvivesFreshProcess() {
         assertTrue("Run the UI flow first", expectedFile.isFile)
         val expected = JSONObject(expectedFile.readText())
+        assumeTrue("Run this phase in a new instrumentation process", expected.getInt("instrumentationPid") != android.os.Process.myPid())
         launch()
         waitText(expected.getString("title"))
         val id = expected.getString("campaignId")
@@ -187,6 +201,15 @@ class AgentBlackBoxTest {
             device.waitForIdle()
         }
         waitText(text)
+    }
+    private fun scrollToContains(text: String) {
+        repeat(12) {
+            if (device.hasObject(By.textContains(text)) || device.hasObject(By.descContains(text))) return
+            val pane = device.findObjects(By.scrollable(true)).maxByOrNull { it.visibleBounds.height() * it.visibleBounds.width() }
+            requireNotNull(pane) { "No scroll pane while finding $text" }.scroll(Direction.DOWN, 0.72f)
+            device.waitForIdle()
+        }
+        waitContains(text)
     }
     private fun screenshot(name: String) { device.waitForIdle(); assertTrue(device.takeScreenshot(File(folder, "$name.png"))) }
 }

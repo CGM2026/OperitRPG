@@ -18,14 +18,16 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
   validate(campaign)
   val module=dao.module(campaign.module.id,campaign.module.version)?:error("MODULE_NOT_INSTALLED")
   require(module.hash==campaign.module.hash && module.state=="READY") { "MODULE_VERSION_MISMATCH" }
+  val definition=RoomModuleCatalog(db).get(campaign.module)
+  require(campaign.rules==VersionRef(definition.rules.adapterId,definition.rules.adapterVersion,definition.contentHash)){"RULE_VERSION_MISMATCH"}
   dao.insertCampaign(campaign.row(null)); saveWorld(campaign)
   dao.insertInitial(textParts(encode(campaign.world)).mapIndexed{i,p->InitialStatePart(campaign.id,i,p)})
  }
  override fun loadCampaign(campaignId:String):Campaign?=db.atomic { dao.campaign(campaignId)?.let(::campaign) }
- override fun loadTurn(campaignId:String,turnId:String):Turn?=dao.turn(campaignId,turnId)?.let{decode(it.json)}
- override fun findTurnByClientMessage(campaignId:String,clientMessageId:String):Turn?=dao.clientTurn(campaignId,clientMessageId)?.let{decode(it.json)}
+ override fun loadTurn(campaignId:String,turnId:String):Turn?=db.atomic {dao.turn(campaignId,turnId)?.let(::hydrateTurn)}
+ override fun findTurnByClientMessage(campaignId:String,clientMessageId:String):Turn?=db.atomic {dao.clientTurn(campaignId,clientMessageId)?.let(::hydrateTurn)}
  override fun listCampaigns(offset:Int,limit:Int):List<CampaignHeader> { require(offset>=0); return dao.campaigns(offset,page(limit)).map { CampaignHeader(CampaignRef(LONGFORM_ENGINE,it.id),it.title,it.updatedAt) } }
- override fun history(campaignId:String,beforeOrdinal:Long?,limit:Int):List<Turn> =dao.turns(campaignId,beforeOrdinal,page(limit)).map{decode(it.json)}
+ override fun history(campaignId:String,beforeOrdinal:Long?,limit:Int):List<Turn> =db.atomic {dao.turns(campaignId,beforeOrdinal,page(limit)).map(::hydrateTurn)}
  override fun events(campaignId:String,afterSeq:Long,limit:Int):List<WorldEvent> =dao.events(campaignId,afterSeq,page(limit)).map{decode(it.json)}
  override fun <T> transaction(campaignId:String,block:(AgentTransaction)->T):T=db.atomic {
   val original=dao.campaign(campaignId)?:error("CAMPAIGN_NOT_FOUND")
@@ -36,28 +38,34 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
    override fun saveCampaign(campaign:Campaign) {
     require(campaign.id==campaignId && campaign.module==current.module && campaign.rules==current.rules) { "IMMUTABLE_CAMPAIGN_BINDING" }
     require(campaign.revision>=current.revision && campaign.lastEventSeq>=current.lastEventSeq)
-    validate(campaign); current=campaign
-    dao.updateCampaign(campaign.row(pending)); saveWorld(campaign)
+    validate(campaign); val worldChanged=campaign.world!=current.world;current=campaign
+    dao.updateCampaign(campaign.row(pending)); if(worldChanged)saveWorld(campaign)
    }
    override fun saveTurn(turn:Turn) {
     require(turn.campaignId==campaignId)
     val terminal=turn.phase in setOf(TurnPhase.COMPLETE,TurnPhase.CANCELLED)
     require(terminal || pending==null || pending==turn.id) { "TURN_ALREADY_PENDING" }
-    val previous=dao.turn(campaignId,turn.id)
-    if(previous==null) dao.insertTurn(TurnRow(turn.id,campaignId,turn.clientMessageId,turn.ordinal,turn.phase.name,encode(turn)))
-    else { require(previous.clientMessageId==turn.clientMessageId && previous.ordinal==turn.ordinal); dao.updateTurn(previous.copy(phase=turn.phase.name,json=encode(turn))) }
+    persistTurn(turn)
     pending=if(terminal && pending==turn.id) null else if(!terminal) turn.id else pending
     dao.updateCampaign(current.row(pending))
     turn.result?.let { result->
      val id="event:$campaignId:${result.eventSeq}"
      val roll=result.dice?.let{"；骰点 ${it.value}/${it.threshold}"}.orEmpty()
      val outcome=if(result.success)"成功" else "未成功"
-     if(dao.memory(campaignId,id)==null) RoomMemoryRepository(db).save(MemoryItem(id,campaignId,"${result.publicSummary}；$outcome$roll",turn.plan?.proposal?.targetIds.orEmpty(),result.eventSeq,result.eventSeq,Visibility(Audience.PUBLIC),"ACTIVE"))
+     if(dao.memory(campaignId,id)==null) RoomMemoryRepository(db).save(MemoryItem(id,campaignId,"${result.publicSummary}；$outcome$roll",turn.plan?.proposal?.targetIds.orEmpty(),result.eventSeq,result.eventSeq,Visibility(Audience.PUBLIC),"ACTIVE",sourceTurnId=turn.id))
+    }
+    if(turn.phase==TurnPhase.COMPLETE && turn.result==null && turn.narration!=null) {
+     val id="conversation:$campaignId:${turn.id}"
+     if(dao.memory(campaignId,id)==null) {
+      fun quote(text:String,limit:Int)=text.take(limit).trimEnd{Character.isHighSurrogate(it)}
+      val text="玩家原话：${quote(turn.playerText,4000)}；主持回应：${quote(requireNotNull(turn.narration),7000)}（对话记录，不代表世界状态）"
+      RoomMemoryRepository(db).save(MemoryItem(id,campaignId,text,emptyList(),current.lastEventSeq,current.lastEventSeq,Visibility(Audience.PUBLIC),"ACTIVE",sourceTurnId=turn.id,kind="CONVERSATION"))
+     }
     }
     if(turn.phase==TurnPhase.COMPLETE && turn.ordinal%20L==0L && current.lastEventSeq>0) dao.insertJob(DerivedJobRow("summary:$campaignId:${turn.ordinal}",campaignId,"SUMMARY",maxOf(1,current.lastEventSeq-19),current.lastEventSeq,"PENDING",null))
    }
    override fun appendEvent(event:WorldEvent) {
-    require(event.campaignId==campaignId && event.eventVersion==1)
+    require(event.campaignId==campaignId && event.eventVersion==1 && event.seq==current.lastEventSeq+1)
     val latest=dao.events(campaignId,event.seq-1,1)
     require(latest.isEmpty()) { "DUPLICATE_EVENT" }
     dao.insertEvent(EventRow(campaignId,event.seq,event.turnId,event.eventVersion,encode(event)))
@@ -65,6 +73,15 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
   }
   block(tx)
  }
+ internal fun persistTurn(turn:Turn) {
+  val previous=dao.turn(turn.campaignId,turn.id)
+  val row=TurnRow(turn.id,turn.campaignId,turn.clientMessageId,turn.ordinal,turn.phase.name,encode(turn.copy(attempts=emptyList(),tools=emptyList(),narration=null)))
+  if(previous==null)dao.insertTurn(row) else {require(previous.clientMessageId==turn.clientMessageId && previous.ordinal==turn.ordinal);dao.updateTurn(row)}
+  dao.insertAttempts(turn.attempts.mapIndexed{i,a->AttemptRow(a.id,turn.id,i,a.purpose,a.fingerprint,a.status,a.usage?.inputTokens,a.usage?.outputTokens)})
+  dao.insertTools(turn.tools.mapIndexed{i,t->ToolResultRow(turn.id,t.invocationId,i,encode(t))})
+  turn.narration?.let{dao.insertNarration(NarrationRow(turn.id,it))}
+ }
+ private fun hydrateTurn(row:TurnRow):Turn=decode<Turn>(row.json).copy(attempts=dao.attempts(row.id).map{ModelAttempt(it.id,it.purpose,it.fingerprint,it.status,if(it.inputTokens!=null && it.outputTokens!=null)Usage(it.inputTokens,it.outputTokens) else null)},tools=dao.tools(row.id).map{decode(it.json)},narration=dao.narration(row.id)?.text)
  private fun validate(c:Campaign) {
   require(c.id.isNotBlank() && c.title.isNotBlank() && c.title.length<=100 && c.revision>=0 && c.lastEventSeq>=0)
   require(c.world.facts.map{it.id}.distinct().size==c.world.facts.size)

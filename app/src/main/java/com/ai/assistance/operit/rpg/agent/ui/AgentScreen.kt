@@ -13,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.rpg.agent.contract.*
@@ -123,7 +125,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                                         if (turn.canResume) TextButton(onClick = { controller.resume(turn.id) }, enabled = !state.busy) { Text("继续本轮") }
                                         if (turn.canCancel) TextButton(onClick = { controller.cancel(turn.id) }, enabled = !state.busy) { Text("取消行动") }
                                     }
-                                    turn.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("规则出处 · ${evidence.ruleId}") } }
+                                    turn.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("规则出处 · ${evidence.source.anchor}") } }
                                 }
                             }
                         }
@@ -146,19 +148,20 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                             if (state.notes.isEmpty()) Text("还没有可见记事。")
                             state.notes.forEach { note -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(note.text)
-                                Text("来源事件 ${note.fromSeq}–${note.toSeq}", style = MaterialTheme.typography.bodySmall)
+                                Text(if (note.kind == "CONVERSATION") "对话回合" else "来源事件 ${note.fromSeq}–${note.toSeq}", style = MaterialTheme.typography.bodySmall)
                                 if (note.supersedesId != null) Text("已更正先前记事", style = MaterialTheme.typography.bodySmall)
                                 Row { TextButton(onClick = { controller.readNoteSource(note) }) { Text("查看来源") }; TextButton(onClick = { correcting = note; correction = note.text }) { Text("更正") } }
+                                if (note.supersedesId != null) TextButton(onClick = { controller.readCorrectionHistory(note.id) }) { Text("更正记录") }
                             } }
                         }
                         "规则" -> {
                             var query by rememberSaveable { mutableStateOf("") }
                             OutlinedTextField(query, { query = it }, label = { Text("查询本团规则") }, modifier = Modifier.fillMaxWidth())
                             Button(onClick = { controller.searchRules(query) }, enabled = !state.busy && query.isNotBlank()) { Text("查找出处") }
-                            state.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("${evidence.ruleId} · ${evidence.source.anchor}") } }
+                            state.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("${evidence.source.anchor} · ${authorityText(evidence.source.authority)}") } }
                         }
                         "存档" -> {
-                            Text("模型变更只用于后续请求。中断回合请先继续或取消。", style = MaterialTheme.typography.bodySmall)
+                            Text("模型变更用于后续请求。已结算但叙述中断时，可明确绑定模型后继续旁白，已保存结果保持不变。", style = MaterialTheme.typography.bodySmall)
                             state.models.forEach { model -> OutlinedButton(onClick = { controller.bindModel(model.id) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (model.fingerprint == play.modelFingerprint) " · 当前" else "") } }
                             TextButton(onClick = onModelSettings) { Text("模型配置") }
                             OutlinedButton(onClick = { exporter.launch("${play.title}.rpgsave2.zip") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出完整备份") }
@@ -168,11 +171,11 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                     }
                 }
             }
-            selectedEvidence?.let { evidence -> AlertDialog(onDismissRequest = { selectedEvidence = null }, title = { Text(evidence.ruleId) }, text = {
+            selectedEvidence?.let { evidence -> AlertDialog(onDismissRequest = { selectedEvidence = null }, title = { Text(evidence.source.anchor) }, text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(evidence.quote)
-                    Text("${evidence.source.sourceId} · ${evidence.source.anchor}", style = MaterialTheme.typography.bodySmall)
-                    Text(if (evidence.source.authority == "temporary" || evidence.source.authority == "house_rule") "本团裁定" else evidence.source.authority, style = MaterialTheme.typography.bodySmall)
+                    Text("${evidence.source.sourceId.substringAfterLast('/')} · ${evidence.source.anchor}", style = MaterialTheme.typography.bodySmall)
+                    Text(authorityText(evidence.source.authority), style = MaterialTheme.typography.bodySmall)
                 }
             }, confirmButton = { TextButton(onClick = { selectedEvidence = null }) { Text("关闭") } }) }
             correcting?.let { original -> AlertDialog(onDismissRequest = { correcting = null }, title = { Text("更正记事") }, text = {
@@ -191,6 +194,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
 }
 
 @Composable private fun Detail(title: String, detail: String) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(detail) } }
+private fun authorityText(value: String) = when (value) { "temporary", "house_rule" -> "本团裁定"; "module_rule" -> "模组规则"; "module_custom" -> "模组自定"; "reference" -> "参考资料"; "source" -> "资料原文"; else -> value }
 
 @Composable private fun AgentCreate(state: AgentUiState, controller: AgentUiController, onLibrary: () -> Unit, onModels: () -> Unit) {
     var title by rememberSaveable { mutableStateOf("") }
@@ -208,7 +212,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
         module?.let { selected ->
             Text(selected.description)
             Text("选择角色", style = MaterialTheme.typography.titleMedium)
-            selected.characters.forEach { character -> OutlinedButton(onClick = { characterId = character.id }, modifier = Modifier.fillMaxWidth()) { Text(character.name + if (characterId == character.id) " ✓" else "") } }
+            selected.characters.forEach { character -> OutlinedButton(onClick = { characterId = character.id }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "选择角色 · ${character.name}" }) { Column { Text(character.name + if (characterId == character.id) " ✓" else ""); Text(character.detail, style = MaterialTheme.typography.bodySmall) } } }
         }
         Row { Switch(checked = allow, onCheckedChange = { allow = it }); Column(Modifier.padding(start = 12.dp)) { Text(if (allow) "允许补充细节" else "严格采用模组"); Text(if (allow) "在模组允许范围内补充人物、场景和支线。" else "按模组既有内容推进。", style = MaterialTheme.typography.bodySmall) } }
         Text("选择模型", style = MaterialTheme.typography.titleMedium)
@@ -242,7 +246,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
             state.models.filter { it.id != "offline-demo" }.forEach { model -> OutlinedButton(onClick = { modelId = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (modelId == model.id) " ✓" else "") } }
             TextButton(onClick = onModels) { Text("模型配置") }
             OutlinedTextField(budget, { budget = it }, label = { Text("整理调用次数上限（1–4）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { organizeConfirm = true }, enabled = !state.busy && selected.isNotEmpty() && state.models.any { it.id == modelId } && budget.toIntOrNull() in 1..4, modifier = Modifier.fillMaxWidth()) { Text("整理为模组草稿") }
+            Button(onClick = { organizeConfirm = true }, enabled = !state.busy && selected.isNotEmpty() && state.models.any { it.id == modelId } && budget.toIntOrNull()?.let { it in 1..4 } == true, modifier = Modifier.fillMaxWidth()) { Text("整理为模组草稿") }
         } }
     }
     if (organizeConfirm) AlertDialog(onDismissRequest = { organizeConfirm = false }, title = { Text("发送所选资料给模型") }, text = { Text("将发送 ${selected.size} 份资料，调用所选模型，最多 ${budget} 次。生成内容先保存为草稿，检查来源与缺项并确认后才能激活。") },

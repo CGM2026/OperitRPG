@@ -35,7 +35,7 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
      }
     }
     lines(dir,"events.jsonl") { emit->var after=0L; while(true) { val rows=store.events(campaignId,after,200); if(rows.isEmpty())break; rows.forEach{emit(encode(it))}; after=rows.last().seq } }
-    lines(dir,"memory.jsonl") { emit->var after=""; while(true) { val rows=db.dao().exportMemory(campaignId,after,200); if(rows.isEmpty())break; rows.forEach{r->emit(encode(MemoryItem(r.id,r.campaignId,r.text,decode(r.entitiesJson),r.fromSeq,r.toSeq,Visibility(Audience.valueOf(r.audience),r.subjectId),r.status,r.supersedesId)))}; after=rows.last().id } }
+    lines(dir,"memory.jsonl") { emit->var after=""; while(true) { val rows=db.dao().exportMemory(campaignId,after,200); if(rows.isEmpty())break; rows.forEach{r->emit(encode(MemoryItem(r.id,r.campaignId,r.text,decode(r.entitiesJson),r.fromSeq,r.toSeq,Visibility(Audience.valueOf(r.audience),r.subjectId),r.status,r.supersedesId,r.sourceTurnId,r.kind)))}; after=rows.last().id } }
     lines(dir,"summaries.jsonl"){emit->var offset=0; while(true){val rows=db.dao().summaries(campaignId,offset,200);if(rows.isEmpty())break;rows.forEach{emit(encode(it.copy(modelFingerprint="")))};offset+=rows.size}}
     lines(dir,"jobs.jsonl"){emit->var offset=0; while(true){val rows=db.dao().jobs(campaignId,offset,200);if(rows.isEmpty())break;rows.forEach{emit(encode(it))};offset+=rows.size}}
     lines(dir,"corrections.jsonl"){emit->var offset=0;while(true){val rows=db.dao().corrections(campaignId,offset,200);if(rows.isEmpty())break;rows.forEach{emit(encode(it))};offset+=rows.size}}
@@ -90,15 +90,18 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
     // Preserve the immutable starting state rather than replacing it with the final projection.
     db.openHelper.writableDatabase.execSQL("DELETE FROM initial_state_part WHERE campaignId=?",arrayOf(newId))
     db.dao().insertInitial(textParts(encode(initial)).mapIndexed{i,p->InitialStatePart(newId,i,p)})
+    var restoredTurnCount=0L
     eachLine(dir,"turns.jsonl"){line->val t=decode<Turn>(line)
      require(t.campaignId==original.id && t.phase in setOf(TurnPhase.COMPLETE,TurnPhase.CANCELLED) && t.attempts.isEmpty() && t.tools.isEmpty())
      require(t.ordinal in 1 until original.nextTurnOrdinal && t.baseRevision in 0..original.revision)
      val nt=t.copy(id=mapped(t.id),campaignId=newId,clientMessageId=mapped(t.clientMessageId),result=t.result?.let{it.copy(turnId=mapped(it.turnId))})
-     db.dao().insertTurn(TurnRow(nt.id,newId,nt.clientMessageId,nt.ordinal,nt.phase.name,encode(nt)))
+     store.persistTurn(nt)
+     restoredTurnCount++
     }
+    require(restoredTurnCount==original.nextTurnOrdinal-1){"INCOMPLETE_TURN_HISTORY"}
     eachLine(dir,"events.jsonl"){line->val e=decode<WorldEvent>(line);val t=db.dao().turn(newId,mapped(e.turnId))?:error("DANGLING_EVENT_TURN");val turn=decode<Turn>(t.json);val result=requireNotNull(turn.result);require(result.eventSeq==e.seq && result.dice==e.dice && result.turnId==turn.id){"EVENT_RESULT_MISMATCH"};val ne=e.copy(campaignId=newId,turnId=mapped(e.turnId));db.dao().insertEvent(EventRow(newId,ne.seq,ne.turnId,ne.eventVersion,encode(ne)))}
     val memory=RoomMemoryRepository(db)
-    eachLine(dir,"memory.jsonl"){line->val m=decode<MemoryItem>(line);require(m.campaignId==original.id);memory.save(m.copy(id=mapped(m.id),campaignId=newId,supersedesId=m.supersedesId?.let(::mapped)))}
+    eachLine(dir,"memory.jsonl"){line->val m=decode<MemoryItem>(line);require(m.campaignId==original.id);memory.save(m.copy(id=mapped(m.id),campaignId=newId,supersedesId=m.supersedesId?.let(::mapped),sourceTurnId=m.sourceTurnId?.let(::mapped)))}
     eachLine(dir,"memory.jsonl"){line->val m=decode<MemoryItem>(line);m.supersedesId?.let{require(db.dao().memory(newId,mapped(it))!=null){"DANGLING_CORRECTION"}}}
     eachLine(dir,"summaries.jsonl"){line->val s=decode<SummaryRow>(line);require(s.campaignId==original.id && s.fromSeq>=1 && s.toSeq<=seq && s.toSeq>=s.fromSeq);db.dao().insertSummary(s.copy(id=mapped(s.id),campaignId=newId,modelFingerprint=""))}
     eachLine(dir,"summary-sources.jsonl"){line->val s=decode<SummarySourceRow>(line);require(s.campaignId==original.id);db.dao().insertSummarySources(listOf(s.copy(summaryId=mapped(s.summaryId),campaignId=newId)))}
@@ -124,16 +127,5 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
   }
  }
  private fun digest(file:File):String {val hash=MessageDigest.getInstance("SHA-256");file.inputStream().use{stream->val buf=ByteArray(32768);while(true){val n=stream.read(buf);if(n<0)break;hash.update(buf,0,n)}};return hash.digest().joinToString(""){"%02x".format(it)}}
- private fun unzip(input:InputStream,dir:File) {
-  var compressed=0L
-  val counted=object:FilterInputStream(input){override fun read():Int=super.read().also{if(it>=0){compressed++;require(compressed<=100L*1024*1024){"BACKUP_COMPRESSED_LIMIT"}}};override fun read(b:ByteArray,off:Int,len:Int):Int=super.read(b,off,len).also{if(it>0){compressed+=it;require(compressed<=100L*1024*1024){"BACKUP_COMPRESSED_LIMIT"}}}}
-  val seen=mutableSetOf<String>();var total=0L
-  ZipInputStream(BufferedInputStream(counted)).use { zip->while(true){val entry=zip.nextEntry?:break
-   require(!entry.isDirectory && entry.name in names+"manifest.json" && seen.add(entry.name)){"INVALID_BACKUP_ENTRY"}
-   var fileSize=0L
-   File(dir,entry.name).outputStream().use{out->val buffer=ByteArray(32768);while(true){val n=zip.read(buffer);if(n<0)break;fileSize+=n;total+=n;require(total<=250L*1024*1024 && fileSize<=200L*1024*1024 && (entry.name!="manifest.json" || fileSize<=65536)){"BACKUP_EXPANDED_LIMIT"};out.write(buffer,0,n)}}
-   zip.closeEntry()
-  }}
-  require(seen==names+"manifest.json"){"BACKUP_MISSING_ENTRY"}
- }
+ private fun unzip(input:InputStream,dir:File)=AgentArchiveStreams.extract(input,dir,names)
 }

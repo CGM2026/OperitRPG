@@ -5,7 +5,7 @@ import com.ai.assistance.operit.rpg.agent.contract.*
 import kotlinx.coroutines.flow.StateFlow
 
 data class AgentModelOption(val id: String, val title: String, val fingerprint: String)
-data class AgentCharacterOption(val id: String, val name: String)
+data class AgentCharacterOption(val id: String, val name: String, val detail: String)
 data class AgentModuleOption(val ref: VersionRef, val title: String, val description: String,
     val characters: List<AgentCharacterOption>)
 data class AgentEntry(val ref: CampaignRef, val title: String, val updatedAt: Long)
@@ -52,6 +52,7 @@ interface AgentUiController {
     fun loadNotes()
     fun correctNote(id: String, text: String)
     fun readNoteSource(note: MemoryItem)
+    fun readCorrectionHistory(id: String)
     fun organize(documentIds: List<String>, modelId: String, callLimit: Int)
     fun readDocument(id: String)
     fun attachDocuments(campaignId: String, documentIds: List<String>)

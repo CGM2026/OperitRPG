@@ -50,8 +50,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     @Volatile private var selectedId: String? = preferences.getString("campaign", null)
     private var operation: Job? = null
     private var activePort: TextModelPort? = null
-    private var loadedTurns = emptyList<Turn>()
-    private var hasOlderTurns = false
+    private val loadedPages = java.util.concurrent.ConcurrentHashMap<String, List<Turn>>()
+    private val olderPages = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private var entryLimit = 50
     private var pendingModule: ValidatedModule? = null
     private var pendingDocument: Pair<String, String>? = null
@@ -59,6 +59,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     private var validatedDraft: ValidatedModule? = null
     private val importer = ModuleZipImporter()
     private val draftFile = File(app.filesDir, "rpg-agent-module-draft.json")
+    private val exampleModules by lazy { ExampleModules.all() }
     private val random = SecureRandom()
 
     init {
@@ -81,7 +82,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     override fun loadMoreEntries() { entryLimit += 50; refresh() }
     override fun open(id: String) = execute("读取战役") {
         val c = requireNotNull(store.loadCampaign(id)) { "CAMPAIGN_NOT_FOUND" }
-        selectedId = id; loadedTurns = emptyList(); hasOlderTurns = false
+        selectedId = id; loadedPages.remove(id); olderPages.remove(id)
         mutable.update { it.copy(notes = emptyList(), evidence = emptyList()) }
         preferences.edit().putString("campaign", id).apply()
         coordinator(c.modelFingerprint, c.module).interrupt(id)
@@ -95,7 +96,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         val model = modelOption(modelId)
         val id = UUID.randomUUID().toString()
         coordinator(model.fingerprint, module).create(id, title, module, characterId, allowGeneration, model.fingerprint)
-        selectedId = id; loadedTurns = emptyList(); hasOlderTurns = false; preferences.edit().putString("campaign", id).apply()
+        selectedId = id; loadedPages.remove(id); olderPages.remove(id); preferences.edit().putString("campaign", id).apply()
         mutable.update { it.copy(notes = emptyList(), evidence = emptyList()) }
     }
     override fun submit(text: String) = execute("正在理解行动", poll = true) {
@@ -120,14 +121,23 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     }
     override fun loadOlder() = execute("读取更早记录") {
         val c = current()
-        val older = store.history(c.id, loadedTurns.minOfOrNull { it.ordinal }, 30)
-        loadedTurns = (loadedTurns + older).associateBy { it.id }.values.sortedBy { it.ordinal }
-        hasOlderTurns = older.size == 30
+        val loaded = loadedPages[c.id].orEmpty()
+        val older = store.history(c.id, loaded.minOfOrNull { it.ordinal }, 30)
+        loadedPages[c.id] = (loaded + older).associateBy { it.id }.values.sortedBy { it.ordinal }
+        olderPages[c.id] = older.size == 30
     }
-    override fun bindModel(modelId: String) = execute("绑定模型") { val c = current(); coordinator(c.modelFingerprint, c.module).rebind(c.id, modelOption(modelId).fingerprint) }
+    override fun bindModel(modelId: String) = execute("绑定模型") {
+        val c = current(); val fingerprint = modelOption(modelId).fingerprint
+        val pending = store.history(c.id, null, 1).firstOrNull { it.phase !in terminal }
+        val engine = coordinator(c.modelFingerprint, c.module)
+        if (pending?.result != null && pending.error != null) {
+            engine.rebindInterruptedNarration(c.id, pending.id, fingerprint)
+            message("已为中断叙述绑定模型。点击继续本轮生成旁白，已保存结果保持不变。")
+        } else engine.rebind(c.id, fingerprint)
+    }
     override fun previewExample(hash: String) = execute("读取示例模组") {
         clearPending()
-        val module = ExampleModules.all().single { it.contentHash == hash }
+        val module = exampleModules.single { it.contentHash == hash }
         pendingModule = module
         mutable.update { it.copy(preview = AgentImportUi(module.manifest.title, "${module.manifest.version} · ${module.manifest.description}\n确认后安装；可选择离线流程演示或你配置的真实模型。", true)) }
     }
@@ -154,7 +164,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             pendingModule != null -> catalog.install(requireNotNull(pendingModule))
             pendingDocument != null -> { val (title, text) = requireNotNull(pendingDocument); documents.importText(title, text, Visibility(Audience.PUBLIC)) }
             pendingBackup != null -> requireNotNull(pendingBackup).inputStream().use { stream ->
-                val ref = backups.importBackup(stream); selectedId = ref.campaignId; loadedTurns = emptyList(); hasOlderTurns = false; preferences.edit().putString("campaign", selectedId).apply()
+                val ref = backups.importBackup(stream); selectedId = ref.campaignId; loadedPages.remove(ref.campaignId); olderPages.remove(ref.campaignId); preferences.edit().putString("campaign", selectedId).apply()
                 mutable.update { it.copy(notes = emptyList(), evidence = emptyList()) }
             }
             else -> error("IMPORT_NOT_SELECTED")
@@ -200,9 +210,22 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     }
     override fun readNoteSource(note: MemoryItem) = execute("读取来源") {
         val c = current(); require(note.campaignId == c.id)
+        val sourceTurnId = note.sourceTurnId
+        if (sourceTurnId != null) {
+            val turn = requireNotNull(store.loadTurn(c.id, sourceTurnId)) { "SOURCE_TURN_NOT_FOUND" }
+            val text = "${turn.playerText}\n\n${turn.narration.orEmpty()}"
+            mutable.update { it.copy(documentText = (if (note.kind == "CONVERSATION") "对话回合" else "记事来源") to text) }
+            return@execute
+        }
         val events = store.events(c.id, (note.fromSeq - 1).coerceAtLeast(0), 100).filter { it.seq <= note.toSeq && it.visibility.audience == Audience.PUBLIC }
         val turns = events.mapNotNull { store.loadTurn(c.id, it.turnId) }.distinctBy { it.id }
-        message(turns.joinToString("\n\n") { "${it.playerText}\n${it.result?.publicSummary.orEmpty()}\n${it.narration.orEmpty()}" }.ifEmpty { "此来源没有可公开的回合正文。" })
+        val text = turns.joinToString("\n\n") { "${it.playerText}\n${it.result?.publicSummary.orEmpty()}\n${it.narration.orEmpty()}" }.ifEmpty { "此来源没有可公开的回合正文。" }
+        mutable.update { it.copy(documentText = "记事来源" to text) }
+    }
+    override fun readCorrectionHistory(id: String) = execute("读取更正记录") {
+        val chain = memories.correctionHistory(RoleContext(current().id, Audience.PUBLIC), id)
+        val text = chain.joinToString("\n\n") { "${if (it.status == "ACTIVE") "当前内容" else "先前内容"}\n${it.text}\n${if (it.kind == "CONVERSATION") "对话回合" else "来源事件 ${it.fromSeq}–${it.toSeq}"}" }
+        mutable.update { it.copy(documentText = "更正记录" to text) }
     }
     override fun organize(documentIds: List<String>, modelId: String, callLimit: Int) = execute("模型正在整理草稿") {
         require(callLimit in 1..4 && documentIds.isNotEmpty())
@@ -250,23 +273,27 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         var offset = 0
         while (offset < entryLimit) { val batch = store.listCampaigns(offset, minOf(500, entryLimit - offset)); newer += batch; if (batch.isEmpty()) break; offset += batch.size }
         val entries = newer.map { AgentEntry(it.ref, it.title, it.updatedAt) } + legacy
-        val c = selectedId?.let(store::loadCampaign)
+        val selectedAtLoad = selectedId
+        val c = selectedAtLoad?.let(store::loadCampaign)
         val play = c?.let { campaign ->
             val module = catalog.get(campaign.module); val public = PublicProjection.campaign(campaign, module)
             val latest = store.history(campaign.id, null, 30)
-            if (loadedTurns.isEmpty()) hasOlderTurns = latest.size == 30
-            loadedTurns = (loadedTurns + latest).associateBy { it.id }.values.sortedBy { it.ordinal }
-            val history = loadedTurns
+            val loaded = loadedPages[campaign.id].orEmpty()
+            if (loaded.isEmpty()) olderPages[campaign.id] = latest.size == 30
+            val history = (loaded + latest).associateBy { it.id }.values.sortedBy { it.ordinal }
+            loadedPages[campaign.id] = history
             val pending = history.lastOrNull { it.phase !in terminal }
             val places = listOf(public.location) + module.world.locations.filter { it.id in public.location.exits }
             AgentPlayUi(campaign.id, public.title, public.location.title,
                 public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", campaign.modelFingerprint,
-                history.map(::adaptTurn), public.npcs.map { AgentPerson(it.id, it.name, it.status) }, places.map { AgentPerson(it.id, it.title, it.description) },
-                public.facts.map { it.text }, public.objectives.map { "${it.title} · ${it.status}" }, pending == null, hasOlderTurns)
+                history.map(::adaptTurn), public.npcs.map { AgentPerson(it.id, it.name, if (it.status == "idle") "在场" else it.status) }, places.map { AgentPerson(it.id, it.title, it.description) },
+                public.facts.map { it.text }, public.objectives.map { "${it.title} · ${when (it.status) { "active" -> "进行中"; "complete" -> "已完成"; else -> it.status }}" }, pending == null, olderPages[campaign.id] == true)
         }
         val models = modelOptions()
         val modules = catalog.list().map(::moduleOption)
-        mutable.update { it.copy(entries = entries.sortedByDescending { e -> e.updatedAt }, hasMoreEntries = newer.size == entryLimit || legacy.size == entryLimit, modules = modules, models = models, documents = documents.list().map { d -> AgentDocumentUi(d.id, d.title) }, play = play, hasSavedDraft = draftFile.isFile, sampleModules = ExampleModules.all().map(::moduleOption),
+        val referenceDocuments = documents.list().map { d -> AgentDocumentUi(d.id, d.title) }
+        val samples = exampleModules.map(::moduleOption)
+        mutable.update { if (selectedAtLoad != selectedId) it else it.copy(entries = entries.sortedByDescending { e -> e.updatedAt }, hasMoreEntries = newer.size == entryLimit || legacy.size == entryLimit, modules = modules, models = models, documents = referenceDocuments, play = play, hasSavedDraft = draftFile.isFile, sampleModules = samples,
             progress = if (it.busy) play?.turns?.lastOrNull()?.stage?.takeIf { text -> text.isNotBlank() } ?: it.progress else null) }
     }
     private fun adaptTurn(t: Turn): AgentTurnUi = AgentTurnUi(t.id, t.playerText, t.narration.orEmpty(), stageText(t), t.result?.let { r ->
@@ -323,6 +350,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         while (true) { val n = input.read(buffer); if (n < 0) break; require(output.size() + n <= limit) { "DOCUMENT_TOO_LARGE" }; output.write(buffer, 0, n) }
         return output.toByteArray()
     }
-    private fun moduleOption(module: ValidatedModule) = AgentModuleOption(VersionRef(module.manifest.moduleId, module.manifest.version, module.contentHash), module.manifest.title, module.manifest.description, module.world.characters.map { AgentCharacterOption(it.id, it.name) })
+    private fun moduleOption(module: ValidatedModule) = AgentModuleOption(VersionRef(module.manifest.moduleId, module.manifest.version, module.contentHash), module.manifest.title, module.manifest.description, module.world.characters.map { character -> AgentCharacterOption(character.id, character.name, (character.skills + character.resources).entries.joinToString(" · ") { "${it.key} ${it.value}" }) })
     private companion object { val terminal = setOf(TurnPhase.COMPLETE, TurnPhase.CANCELLED); const val DEMO_FINGERPRINT = "explicit-demo-v1" }
 }

@@ -45,7 +45,7 @@ const val LONGFORM_ENGINE = "longform-v1"
 @Serializable data class Usage(val inputTokens: Int, val outputTokens: Int)
 @Serializable data class ModelAttempt(val id: String, val purpose: String, val fingerprint: String, val status: String, val usage: Usage? = null)
 @Serializable data class Turn(val id: String, val campaignId: String, val ordinal: Long, val clientMessageId: String, val playerText: String, val baseRevision: Long, val phase: TurnPhase, val plan: FrozenPlan? = null, val result: CommittedResult? = null, val narration: String? = null, val attempts: List<ModelAttempt> = emptyList(), val tools: List<ToolResult> = emptyList(), val error: String? = null)
-@Serializable data class MemoryItem(val id: String, val campaignId: String, val text: String, val entityIds: List<String>, val fromSeq: Long, val toSeq: Long, val visibility: Visibility, val status: String, val supersedesId: String? = null)
+@Serializable data class MemoryItem(val id: String, val campaignId: String, val text: String, val entityIds: List<String>, val fromSeq: Long, val toSeq: Long, val visibility: Visibility, val status: String, val supersedesId: String? = null, val sourceTurnId: String? = null, val kind: String = "EVENT")
 @Serializable data class CampaignHeader(val ref: CampaignRef, val title: String, val updatedAt: Long)
 @Serializable data class BackupManifestV2(val archiveFormatVersion: Int, val engineId: String, val engineVersion: Int, val eventSchemaVersion: Int, val module: VersionRef, val rules: VersionRef, val files: List<FileDigest>)
 @Serializable data class ContextPacket(val purpose: String, val system: String, val input: String, val maxOutputTokens: Int)

@@ -2,6 +2,7 @@ package com.ai.assistance.operit.rpg.agent.engine
 
 import com.ai.assistance.operit.rpg.agent.contract.*
 import com.ai.assistance.operit.rpg.agent.tools.StrictJson
+import com.ai.assistance.operit.rpg.agent.memory.PlanningSnapshot
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.util.UUID
@@ -11,7 +12,8 @@ class DemoTextModelPort(private val module:ValidatedModule):TextModelPort {
     override fun cancel(attemptId:String) = Unit
     override suspend fun generate(attemptId:String,packet:ContextPacket):TextModelReply {
         if(packet.purpose=="narrator")return TextModelReply("行动已经记录。你可以查看检定结果，继续调查、交谈、移动或等待。",Usage(0,0))
-        val world=StrictJson.decode<WorldState>(packet.input.substringBefore("\nRules:"))
+        val snapshot=StrictJson.decode<PlanningSnapshot>(packet.input.substringBefore("\nRules:"))
+        val world=WorldState(snapshot.location.id,snapshot.resources,snapshot.skills,snapshot.npcs.map { NpcState(it.id,it.name,it.locationId,it.status,"","") },emptyList(),emptyList(),snapshot.objectives,emptyList(),gameTime=snapshot.gameTime)
         val player=packet.input.substringAfter("\nPlayer:").substringBefore("\nTool results:")
         val toolJson=packet.input.substringAfter("\nTool results:").substringBefore("\nMemory:")
         val results=StrictJson.decode<List<ToolResult>>(toolJson)

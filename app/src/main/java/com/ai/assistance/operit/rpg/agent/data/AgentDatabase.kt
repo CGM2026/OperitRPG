@@ -10,6 +10,12 @@ data class CampaignRow(@PrimaryKey val id: String, val title: String, val module
 data class TurnRow(@PrimaryKey val id: String, val campaignId: String, val clientMessageId: String, val ordinal: Long, val phase: String, val json: String)
 @Entity(tableName = "event", primaryKeys=["campaignId", "seq"], indices=[Index("turnId", unique=true)], foreignKeys=[ForeignKey(entity=CampaignRow::class,parentColumns=["id"],childColumns=["campaignId"],onDelete=ForeignKey.CASCADE), ForeignKey(entity=TurnRow::class,parentColumns=["id"],childColumns=["turnId"])])
 data class EventRow(val campaignId: String, val seq: Long, val turnId: String, val eventVersion: Int, val json: String)
+@Entity(tableName="model_attempt",indices=[Index("turnId")],foreignKeys=[ForeignKey(entity=TurnRow::class,parentColumns=["id"],childColumns=["turnId"],onDelete=ForeignKey.CASCADE)])
+data class AttemptRow(@PrimaryKey val id:String,val turnId:String,val ordinal:Int,val purpose:String,val fingerprint:String,val status:String,val inputTokens:Int?,val outputTokens:Int?)
+@Entity(tableName="tool_result",primaryKeys=["turnId","invocationId"],foreignKeys=[ForeignKey(entity=TurnRow::class,parentColumns=["id"],childColumns=["turnId"],onDelete=ForeignKey.CASCADE)])
+data class ToolResultRow(val turnId:String,val invocationId:String,val ordinal:Int,val json:String)
+@Entity(tableName="narration",foreignKeys=[ForeignKey(entity=TurnRow::class,parentColumns=["id"],childColumns=["turnId"],onDelete=ForeignKey.CASCADE)])
+data class NarrationRow(@PrimaryKey val turnId:String,val text:String)
 /** One current entity per row; no campaign aggregate or historical turns are embedded. */
 @Entity(tableName="world_entity",primaryKeys=["campaignId","kind","entityId"],foreignKeys=[ForeignKey(entity=CampaignRow::class,parentColumns=["id"],childColumns=["campaignId"],onDelete=ForeignKey.CASCADE)])
 data class WorldEntityRow(val campaignId: String,val kind: String,val entityId: String,val json: String)
@@ -33,8 +39,8 @@ data class SourcePartRow(val moduleId:String,val version:String,val sourceId:Str
 data class RuleChunkRow(@PrimaryKey val id:String,val moduleId:String,val version:String,val moduleHash:String,val sourceId:String,val sourceHash:String,val anchor:String,val ruleId:String,val authority:String,val audience:String,val subjectId:String?,val quote:String,val offset:Int,val campaignId:String?=null)
 @Fts4 @Entity(tableName="rule_fts")
 data class RuleFtsRow(@PrimaryKey @ColumnInfo(name="rowid") val rowId:Int=0,val chunkId:String,val tokens:String)
-@Entity(tableName="memory_note",indices=[Index(value=["campaignId","fromSeq"]),Index(value=["campaignId","status","audience"])],foreignKeys=[ForeignKey(entity=CampaignRow::class,parentColumns=["id"],childColumns=["campaignId"],onDelete=ForeignKey.CASCADE)])
-data class MemoryRow(@PrimaryKey val id:String,val campaignId:String,val text:String,val entitiesJson:String,val fromSeq:Long,val toSeq:Long,val audience:String,val subjectId:String?,val status:String,val supersedesId:String?)
+@Entity(tableName="memory_note",indices=[Index(value=["campaignId","fromSeq"]),Index(value=["campaignId","status","audience"]),Index("sourceTurnId")],foreignKeys=[ForeignKey(entity=CampaignRow::class,parentColumns=["id"],childColumns=["campaignId"],onDelete=ForeignKey.CASCADE),ForeignKey(entity=TurnRow::class,parentColumns=["id"],childColumns=["sourceTurnId"])])
+data class MemoryRow(@PrimaryKey val id:String,val campaignId:String,val text:String,val entitiesJson:String,val fromSeq:Long,val toSeq:Long,val audience:String,val subjectId:String?,val status:String,val supersedesId:String?,val sourceTurnId:String?,val kind:String)
 @Fts4 @Entity(tableName="memory_fts")
 data class MemoryFtsRow(@PrimaryKey @ColumnInfo(name="rowid") val rowId:Int=0,val memoryId:String,val tokens:String)
 @Serializable @Entity(tableName="summary",indices=[Index(value=["campaignId","fromSeq","toSeq"],unique=true)])
@@ -66,6 +72,12 @@ data class CorrectionRow(@PrimaryKey val id:String,val campaignId:String,val old
  @Query("SELECT * FROM turn WHERE campaignId=:campaignId AND (:before IS NULL OR ordinal<:before) ORDER BY ordinal DESC LIMIT :limit") fun turns(campaignId:String,before:Long?,limit:Int):List<TurnRow>
  @Insert fun insertTurn(row:TurnRow)
  @Update fun updateTurn(row:TurnRow)
+ @Insert(onConflict=OnConflictStrategy.REPLACE) fun insertAttempts(rows:List<AttemptRow>)
+ @Insert(onConflict=OnConflictStrategy.REPLACE) fun insertTools(rows:List<ToolResultRow>)
+ @Insert(onConflict=OnConflictStrategy.REPLACE) fun insertNarration(row:NarrationRow)
+ @Query("SELECT * FROM model_attempt WHERE turnId=:id ORDER BY ordinal") fun attempts(id:String):List<AttemptRow>
+ @Query("SELECT * FROM tool_result WHERE turnId=:id ORDER BY ordinal") fun tools(id:String):List<ToolResultRow>
+ @Query("SELECT * FROM narration WHERE turnId=:id") fun narration(id:String):NarrationRow?
  @Query("SELECT * FROM event WHERE campaignId=:campaignId AND seq>:after ORDER BY seq LIMIT :limit") fun events(campaignId:String,after:Long,limit:Int):List<EventRow>
  @Insert fun insertEvent(row:EventRow)
  @Query("SELECT * FROM world_entity WHERE campaignId=:campaignId") fun world(campaignId:String):List<WorldEntityRow>
@@ -113,6 +125,7 @@ data class CorrectionRow(@PrimaryKey val id:String,val campaignId:String,val old
  @Query("SELECT * FROM summary_source WHERE campaignId=:campaign ORDER BY summaryId,eventSeq LIMIT :limit OFFSET :offset") fun summarySources(campaign:String,offset:Int,limit:Int):List<SummarySourceRow>
  @Query("SELECT * FROM derived_job WHERE id=:id") fun job(id:String):DerivedJobRow?
  @Query("UPDATE summary SET valid=0 WHERE campaignId=:campaignId AND fromSeq<=:toSeq AND toSeq>=:fromSeq") fun invalidateSummaries(campaignId:String,fromSeq:Long,toSeq:Long)
+ @Query("UPDATE derived_job SET state='INTERRUPTED',error='SOURCE_CORRECTED' WHERE campaignId=:campaignId AND fromSeq<=:toSeq AND toSeq>=:fromSeq AND state='RUNNING'") fun interruptCorrectedJobs(campaignId:String,fromSeq:Long,toSeq:Long)
  @Query("SELECT * FROM summary WHERE campaignId=:campaignId ORDER BY fromSeq LIMIT :limit OFFSET :offset") fun summaries(campaignId:String,offset:Int,limit:Int):List<SummaryRow>
  @Insert(onConflict=OnConflictStrategy.IGNORE) fun insertJob(row:DerivedJobRow)
  @Query("SELECT * FROM derived_job WHERE campaignId=:campaignId ORDER BY fromSeq LIMIT :limit OFFSET :offset") fun jobs(campaignId:String,offset:Int,limit:Int):List<DerivedJobRow>
@@ -126,7 +139,7 @@ data class CorrectionRow(@PrimaryKey val id:String,val campaignId:String,val old
  @Query("SELECT d.* FROM reference_document d INNER JOIN campaign_document c ON d.id=c.documentId WHERE c.campaignId=:campaign ORDER BY d.id LIMIT :limit OFFSET :offset") fun attachedDocuments(campaign:String,offset:Int,limit:Int):List<DocumentRow>
 }
 
-@Database(entities=[CampaignRow::class,TurnRow::class,EventRow::class,WorldEntityRow::class,KnowledgeRow::class,NpcRow::class,NpcRelationRow::class,NpcGoalRow::class,FactRow::class,ClaimRow::class,ModuleRow::class,SourcePartRow::class,RuleChunkRow::class,RuleFtsRow::class,MemoryRow::class,MemoryFtsRow::class,SummaryRow::class,DerivedJobRow::class,DocumentRow::class,DocumentPartRow::class,InitialStatePart::class,CampaignDocumentRow::class,SummarySourceRow::class,CorrectionRow::class],version=1,exportSchema=true)
+@Database(entities=[CampaignRow::class,TurnRow::class,EventRow::class,AttemptRow::class,ToolResultRow::class,NarrationRow::class,WorldEntityRow::class,KnowledgeRow::class,NpcRow::class,NpcRelationRow::class,NpcGoalRow::class,FactRow::class,ClaimRow::class,ModuleRow::class,SourcePartRow::class,RuleChunkRow::class,RuleFtsRow::class,MemoryRow::class,MemoryFtsRow::class,SummaryRow::class,DerivedJobRow::class,DocumentRow::class,DocumentPartRow::class,InitialStatePart::class,CampaignDocumentRow::class,SummarySourceRow::class,CorrectionRow::class],version=1,exportSchema=true)
 abstract class AgentDatabase:RoomDatabase() {
  abstract fun dao():AgentDao
  companion object {
