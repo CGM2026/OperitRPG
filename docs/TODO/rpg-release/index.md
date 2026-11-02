@@ -12,7 +12,9 @@ fork: https://github.com/CGM2026/OperitRPG
 
 四个 Secrets 沿用已有值，不生成新 key：RPG_KEYSTORE_BASE64、RPG_STORE_PASSWORD、RPG_KEY_ALIAS、RPG_KEY_PASSWORD。缺失任一项立即失败。签名字段写入 runner 临时 keystore 与 local.properties，结束后删除；缓存仅保存 Gradle 用户目录。
 
-CI 使用 JDK 21、SDK platform 36 和 build-tools 35.0.0，依次运行 core/app 完整单测、release lint 与压缩构建。生成候选前核对包名、版本、target SDK、apksigner 签名、APK SHA256，签名必须与已发布 0.1.0 的证书一致。APK 必须小于 50 MiB，不得包含 lib/ 目录、任何 .so 或未批准的重型 assets。发布说明从同目录 RELEASE_NOTES.md 读取。
+CI 使用 JDK 21、SDK platform 36 和 build-tools 35.0.0，依次运行 core/app 完整单测、release lint 与压缩构建。生成候选前核对包名、版本、target SDK、apksigner 签名、APK SHA256，签名必须与已发布 0.1.0 的证书一致。APK 必须小于 50 MiB；原生白名单只允许 `lib/{arm64-v8a,armeabi-v7a,x86,x86_64}/libandroidx.graphics.path.so`，每个文件小于 64 KiB、总量小于 256 KiB，并核对 ELF 架构。其余原生库与未批准的重型 assets 继续拒绝。检查结果保存在候选的 apk-content-audit.json。发布说明从同目录 RELEASE_NOTES.md 读取。
+
+这项白名单对应 Compose 的标准绘图依赖：当前 [ui-graphics-android 1.10.4 官方 POM](https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics-android/1.10.4/ui-graphics-android-1.10.4.pom) 依赖 graphics-path 1.0.1；[AndroidX 官方说明](https://developer.android.com/jetpack/androidx/releases/graphics) 记载该库通过原生组件将 PathIterator 功能提供到旧版 Android。Google Maven 官方 AAR 的四个 so 分别为 10,096、7,252、9,284、10,760 字节，合计 37,392 字节。保留该绘图库不需要安装 NDK，也不引入旧框架原生模块。
 
 正式发布按以下顺序进行：
 

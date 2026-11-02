@@ -168,14 +168,40 @@ jobs:
           certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([a-fA-F0-9]+)', Path('release/signature.txt').read_text())[1].lower()
           if certificate != os.environ['RPG_EXPECTED_SIGNER_SHA256']:
               raise ValueError('APK certificate differs from the released 0.1.0 identity')
-          allowed_assets = {'assets/dexopt/baseline.prof', 'assets/dexopt/baseline.profm', 'assets/rainy-dock-v1.json', 'assets/plan.schema.json'}
-          with zipfile.ZipFile(apk) as archive:
+          def verify_apk_contents(archive):
+              # ui-graphics-android 1.10.4 depends on Google's graphics-path 1.0.1.
+              # Official AAR: four tiny libraries, 37,392 uncompressed bytes in total.
+              allowed_native = {
+                  'lib/arm64-v8a/libandroidx.graphics.path.so': (2, 183),
+                  'lib/armeabi-v7a/libandroidx.graphics.path.so': (1, 40),
+                  'lib/x86/libandroidx.graphics.path.so': (1, 3),
+                  'lib/x86_64/libandroidx.graphics.path.so': (2, 62),
+              }
+              allowed_assets = {'assets/dexopt/baseline.prof', 'assets/dexopt/baseline.profm', 'assets/rainy-dock-v1.json', 'assets/plan.schema.json'}
+              native_sizes = {}
               for item in archive.infolist():
+                  if item.is_dir():
+                      continue
                   if item.filename.startswith('lib/') or item.filename.endswith('.so'):
-                      raise ValueError('Native libraries are forbidden in dedicated APK: ' + item.filename)
-                  if item.filename.startswith('assets/') and not item.is_dir():
+                      if item.filename not in allowed_native or item.filename in native_sizes:
+                          raise ValueError('Unexpected native library in dedicated APK: ' + item.filename)
+                      if not 0 < item.file_size < 64 * 1024:
+                          raise ValueError('Compose graphics-path library exceeds 64 KiB: ' + item.filename)
+                      with archive.open(item) as stream:
+                          header = stream.read(20)
+                      elf_class, machine = allowed_native[item.filename]
+                      if header[:4] != b'\x7fELF' or header[4:6] != bytes([elf_class, 1]) or int.from_bytes(header[18:20], 'little') != machine:
+                          raise ValueError('Compose graphics-path ELF does not match its ABI: ' + item.filename)
+                      native_sizes[item.filename] = item.file_size
+                  if item.filename.startswith('assets/'):
                       if item.filename not in allowed_assets or item.file_size > 1024**2:
                           raise ValueError('Unexpected or heavy APK asset: ' + item.filename)
+              if sum(native_sizes.values()) >= 256 * 1024:
+                  raise ValueError('Compose graphics-path native payload exceeds 256 KiB')
+              return native_sizes
+          with zipfile.ZipFile(apk) as archive:
+              native_sizes = verify_apk_contents(archive)
+          Path('release/apk-content-audit.json').write_text(json.dumps({'nativeLibraries':native_sizes, 'nativeTotalBytes':sum(native_sizes.values()), 'nativePerFileLimitBytes':65536, 'nativeTotalLimitBytes':262144}, indent=2)+'\n')
           with apk.open('rb') as stream:
               sha = hashlib.file_digest(stream, 'sha256').hexdigest()
           manifest = {'applicationId':'io.github.cgm2026.operitrpg', 'versionName':version, 'versionCode':int(os.environ['RPG_CODE']), 'apkUrl':f'https://github.com/CGM2026/OperitRPG/releases/download/rpg-v{version}/{apk.name}', 'sizeBytes':apk.stat().st_size, 'sha256':sha, 'signerSha256':certificate}

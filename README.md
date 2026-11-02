@@ -27,7 +27,7 @@ AI 解释行动并生成叙述；程序执行骰点、生命、资源、时间�
 - [升级验证夹具](upgrade-fixture/README.md)
 - [0.1.0 发布记录](docs/TODO/rpg_prototype_v01/RELEASE_ACCEPTANCE.md)
 
-默认构建只包含 `app` 与 `rpg-core`。JDK 21、Android SDK 36、Gradle Wrapper 即可构建，不需要 NDK、Rust、Node、原生库归档或外部模型资产。核心测试可独立执行 `gradlew -p rpg-core test`；完整测试、发布检查和 APK 构建由 Actions 执行。release 构建开启代码及资源压缩，CI 要求 APK 小于 50 MiB、不得含 `.so` 或通用工具资产。
+默认构建只包含 `app` 与 `rpg-core`。JDK 21、Android SDK 36、Gradle Wrapper 即可构建，不需要 NDK、Rust、Node、旧框架原生库归档或外部模型资产。核心测试可独立执行 `gradlew -p rpg-core test`；完整测试、发布检查和 APK 构建由 Actions 执行。release 构建开启代码及资源压缩，CI 要求 APK 小于 50 MiB。原生库仅允许 Compose 标准绘图依赖 `libandroidx.graphics.path.so` 的四种 Android ABI，单文件小于 64 KiB、合计小于 256 KiB；旧框架原生库和通用工具资产继续禁止。
 
 升级验证使用同包名、同签名的旧 schema1 小型测试安装包，保存有固定骰点、线索和中断回合的数据，再覆盖安装实际候选 APK。夹具不属于用户发行包；它验证数据与应用升级兼容，实际旧 ARM64 APK 在用户手机上的行为仍需实机验收。
 
