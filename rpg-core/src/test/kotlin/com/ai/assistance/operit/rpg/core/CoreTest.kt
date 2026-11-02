@@ -105,6 +105,36 @@ class CoreTest {
         val r=CampaignRecord("a","t",state,model,0); val t=Turn("t","a",1,"m","你知道阿远在哪里吗",TurnStage.RESOLVED,state.revision,model,0,plan=Plan(PlanKind.DIALOGUE,npcId="keeper"),result=TurnResult(publicSummary="闲谈")); r.turns += t
         val context=ContextBuilder.narrator(r,t); assertFalse(context.contains("第三号")); assertFalse(context.contains("K17")); assertFalse(context.contains("木箱")); assertTrue(context.contains("阿远傍晚去过办公室"))
     }
+    @Test fun actionNarrationIncludesScopedKnowledgeOfPresentNpc() {
+        val r=CampaignRecord("a","t",RainyDock.initialState(),model,0)
+        val t=Turn("t","a",1,"m","等待",TurnStage.RESOLVED,0,model,0,plan=Plan(PlanKind.ACTION,actionId="wait"),result=TurnResult(publicSummary="等待"))
+        val context=RpgJson.instance.parseToJsonElement(ContextBuilder.narrator(r,t)).jsonObject
+        val npc=context.getValue("npcKnowledge").jsonObject
+        assertEquals("keeper",npc.getValue("id").jsonPrimitive.content); assertFalse(npc.toString().contains("K17")); assertFalse(npc.toString().contains("第三号"))
+    }
+    @Test fun oocContextContainsActualPublicRulesAndNoScenarioTruth() {
+        val r=CampaignRecord("a","t",RainyDock.initialState(),model,0)
+        val t=Turn("t","a",1,"m","困难检定怎么算",TurnStage.RESOLVED,0,model,0,plan=Plan(PlanKind.OOC),result=TurnResult(publicSummary="规则问答"))
+        val context=RpgJson.instance.parseToJsonElement(ContextBuilder.narrator(r,t)).jsonObject
+        val rules=context.getValue("rules").jsonPrimitive.content
+        assertTrue(rules.contains("观察60、说服50、攀爬55")); assertTrue(rules.contains("除2向下取整")); assertTrue(rules.contains("第12")); assertTrue(rules.contains("恢复2HP")); assertFalse(context.toString().contains("第三号")); assertFalse(context.toString().contains("木箱"))
+    }
+    @Test fun requestTimeoutIsExplicitFailureWithoutAutomaticRetry() = runBlocking {
+        var calls=0
+        val gateway=object:ModelGateway {
+            override suspend fun plan(request:ModelRequest):ModelReply { calls++; return withTimeout(1) { awaitCancellation() } }
+            override suspend fun narrate(request:ModelRequest)=ModelReply("不用调用")
+            override suspend fun cancel(attemptId:String)=Unit
+        }
+        val store=InMemoryGameStore(); val c=TurnCoordinator(store,gateway); val id=c.createCampaign("t","林舟",model)
+        val outcome=c.submit(id,"m",0,"等待"); assertEquals(OutcomeCode.FAILED,outcome.code); assertEquals("MODEL_TIMEOUT",outcome.message); assertEquals(1,calls); assertEquals("MODEL_TIMEOUT",c.publicView(id).turns.single().errorCode); assertEquals(0,c.publicView(id).tick)
+    }
+    @Test fun controlMetadataCannotBecomeVisibleNarrationOrIntent() {
+        val meta="<meta provider=\"openai:responses_reasoning\">secret-base64</meta>"
+        assertFails { ContextBuilder.validateNarration("雨还在下。$meta",RainyDock.initialState()) }
+        assertFails { ContextBuilder.validateNarration("</think>残留标签",RainyDock.initialState()) }
+        assertFailsWith<InvalidPlanException> { PlanParser.parse("{\"schema_version\":1,\"kind\":\"clarify\",\"question\":\"<meta>secret</meta>\"}") }
+    }
     private class ScriptGateway(var output: String) : ModelGateway {
         var narration="雨还在下。"; var plans=0
         override suspend fun plan(request: ModelRequest): ModelReply { plans++; return ModelReply(output) }

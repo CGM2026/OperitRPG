@@ -29,14 +29,14 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
     private val store = RoomGameStore(RpgDatabase.get(app))
     private val gateway = SelectedModelGateway(OperitModelGateway(app, manager))
     private val engine = TurnCoordinator(store, gateway)
-    private val backups = RpgBackupService(store)
+    private val backups = RpgBackupService(store, app.cacheDir)
     private val preferences = app.getSharedPreferences("rpg-ui", 0)
-    private var selectedId: String? = preferences.getString("campaign", null)
+    @Volatile private var selectedId: String? = preferences.getString("campaign", null)
     private val mutable = MutableStateFlow(RpgUiState())
     override val state: StateFlow<RpgUiState> = mutable.asStateFlow()
     private var operation: Job? = null
     private var imported: CampaignRecord? = null
-    private var configurations = emptyMap<String, ModelConfiguration>()
+    @Volatile private var configurations = emptyMap<String, ModelConfiguration>()
 
     init {
         viewModelScope.launch {
@@ -92,6 +92,7 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
         if (from == null || !from.actionEnabled) return
         launchOperation {
             val view = current()
+            require(view.model.providerId != "UNBOUND") { "请先选择模型" }
             showOutcome(engine.submitAction(view.id, UUID.randomUUID().toString(), view.revision, "move.${view.location.id}_$locationId"))
         }
     }

@@ -7,7 +7,7 @@ class InvalidPlanException(message: String) : IllegalArgumentException(message)
 object PlanParser {
     fun parse(text: String): Plan {
         try {
-            require(text.length <= 4096 && !text.contains(Regex("(?i)<\\s*/?\\s*(tool|think|analysis)|```")))
+            require(text.length <= 4096 && !text.contains(Regex("(?i)<\\s*/?\\s*(tool|think|analysis|meta)|```")))
             // A strict lexical pass rejects duplicate keys as well as concatenated documents.
             val inputKeys = topLevelKeys(text)
             require(inputKeys.distinct().size == inputKeys.size)

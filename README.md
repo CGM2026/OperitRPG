@@ -1,3 +1,7 @@
+# 雨夜跑团 · OperitRPG
+
+本仓库是基于 Operit 的 Android 单人跑团原型。查看 [跑团说明与验收入口](README_RPG.md)，或在手机打开 [本项目 Releases](https://github.com/CGM2026/OperitRPG/releases) 下载安装。后续可在应用中手动检查并确认更新。下方保留上游项目介绍及版权来源，其中上游下载链接不用于本项目升级。
+
 <h1 align="center">
   <img src="app/src/main/assets/logo.svg" width="48" height="48" align="absmiddle" alt=""> Operit AI
 </h1>

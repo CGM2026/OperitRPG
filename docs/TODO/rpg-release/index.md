@@ -19,7 +19,9 @@ fork: https://github.com/CGM2026/OperitRPG
 
 完整构建使用 JDK 21、Node 22、Android SDK 36、NDK 25.1.8937393、CMake 3.22.1、Rust 1.88.0。流程保留上游 terminal 子模块、libs/subpack/jniLibs 三套外部依赖、native ripgrep、WebChat 和 ToolPkg 资产。外部归档沿用上游固定 Google Drive 文件 id，通过上游检查解压到规定目录；下载链接或权限失效时构建会失败。归档来源目前没有内容 SHA256 锁，首轮成功后可记录稳定归档校验值。
 
-构建运行 rpg-core 测试并生成完整 release APK。发布前用 apksigner 检查签名，用 apkanalyzer 对照包名和版本，再生成 `update-manifest.json`、`SHA256SUMS` 与 `signature.txt`。上游其他 workflows 在本 fork 跳过，仍保留原定义供查阅。
+依赖归档在解压验证成功后立即保存缓存，native ripgrep 在构建成功后立即保存缓存；后面的 Android 编译失败不会丢失这些缓存。CMake 已取得的源码和 STT 资产在文件存在时也会保存，包括构建失败场景。缓存使用明确的 restore/save 步骤，构建错误继续使 job 失败。CI 限制 Gradle 为两个 worker、关闭并行项目构建，Kotlin 与 Gradle 同进程，Gradle 堆上限 6 GiB。
+
+构建运行 rpg-core 测试和 app 中的 RPG release 单测并生成完整 release APK。app 的 `--tests` 只筛选执行对象，Gradle 仍会编译整个 app 单测源码集。发布前用 apksigner 检查签名，用 apkanalyzer 对照包名和版本，再生成 `update-manifest.json`、`SHA256SUMS` 与 `signature.txt`。上游其他 workflows 在本 fork 跳过，仍保留原定义供查阅。
 
 ## 应用更新接口
 
@@ -29,6 +31,10 @@ fork: https://github.com/CGM2026/OperitRPG
 
 ## 检查记录
 
-本地通过全部 workflow YAML 解析、发布流程内嵌 Python 语法检查和 `git diff --check`。本机缺少完整 Android SDK/NDK，Android 编译与手机安装验证由首轮 Actions 产物和设备验收完成；静态检查不代表已完成设备验收。
+本地通过全部 workflow YAML 解析、发布流程内嵌 Python 语法检查、15 段发布 shell 脚本的 `bash -n` 和 `git diff --check`。独立 JVM 合跑 42 项测试全部通过，包括核心 22、备份 9、更新 manifest/地址/重定向策略 5、下载 SHA256/长度验证 4、私密日志协程隔离 2。真实 AppLogger 文件输出/Logcat 守卫测试纳入 app CI。
+
+本机缺少完整 Android SDK/NDK，Android 编译与手机安装验证由首轮 Actions 产物和设备验收完成。
+
+RPG 模型调用通过 `AppLogger.withPrivateLogging` 隔离当前请求及其子协程，阻断提示正文、响应和异常进入 Logcat 或日志文件；并发的通用请求保持原有日志行为。首版 RPG 排除本地 MNN/LLAMA_CPP 和插件供应商，云服务使用现有同步 HTTP 调用路径。
 
 设备验收需从已签名首版实际安装，再发布更高版本，检查版本说明、下载确认、未知来源返回、系统安装确认和资料保留；同时检查断网重试、错误 SHA256、错误包名、错误签名和较旧版本被拒绝。

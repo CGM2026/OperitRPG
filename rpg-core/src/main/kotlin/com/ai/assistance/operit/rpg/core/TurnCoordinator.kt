@@ -3,6 +3,7 @@ package com.ai.assistance.operit.rpg.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.encodeToString
 
 class TurnCoordinator(private val store: GameStore, private val gateway: ModelGateway, private val dice: DiceSource = SecureRandomDice(), private val clock: Clock = SystemClock, private val ids: IdGenerator = UuidGenerator) {
@@ -67,7 +68,7 @@ class TurnCoordinator(private val store: GameStore, private val gateway: ModelGa
             }
             if (outcome.code != OutcomeCode.APPLIED || parsed.kind == PlanKind.CLARIFY) return outcome
             return resolvePrepared(campaignId, turnId, requestRevision(campaignId, turnId))
-        } catch (e: Exception) { if (e is CancellationException) { withContext(NonCancellable) { fail(campaignId, turnId, request.attemptId, "INTERRUPTED") }; throw e }; return fail(campaignId, turnId, request.attemptId, if (e is IllegalArgumentException || e is IllegalStateException) "INVALID_MODEL_OUTPUT" else "MODEL_REQUEST_FAILED") }
+        } catch (e: Exception) { if (e is TimeoutCancellationException) return fail(campaignId, turnId, request.attemptId, "MODEL_TIMEOUT"); if (e is CancellationException) { withContext(NonCancellable) { fail(campaignId, turnId, request.attemptId, "INTERRUPTED") }; throw e }; return fail(campaignId, turnId, request.attemptId, if (e is IllegalArgumentException || e is IllegalStateException) "INVALID_MODEL_OUTPUT" else "MODEL_REQUEST_FAILED") }
     }
     suspend fun confirmPlan(campaignId: String, turnId: String, expectedPlanHash: String): TurnOutcome {
         val confirmed = store.transaction(campaignId) { r -> val t = r.turns.single { it.id == turnId }; when {
@@ -107,7 +108,7 @@ class TurnCoordinator(private val store: GameStore, private val gateway: ModelGa
                 if (t.attemptId != request.attemptId || t.stage != TurnStage.NARRATING) return@transaction TurnOutcome(OutcomeCode.BUSY, turnId, "STALE_ATTEMPT")
                 ContextBuilder.validateNarration(reply.text, r.state); t.narration = reply.text; t.stage = TurnStage.COMPLETE; finishAttempt(t, reply, clock.now() - started); r.updatedAt = clock.now(); TurnOutcome(OutcomeCode.APPLIED, turnId)
             }
-        } catch (e: Exception) { if (e is CancellationException) { withContext(NonCancellable) { fail(campaignId, turnId, request.attemptId, "INTERRUPTED") }; throw e }; fail(campaignId, turnId, request.attemptId, if (e is IllegalArgumentException) "INVALID_NARRATION" else "MODEL_REQUEST_FAILED") }
+        } catch (e: Exception) { if (e is TimeoutCancellationException) return fail(campaignId, turnId, request.attemptId, "MODEL_TIMEOUT"); if (e is CancellationException) { withContext(NonCancellable) { fail(campaignId, turnId, request.attemptId, "INTERRUPTED") }; throw e }; fail(campaignId, turnId, request.attemptId, if (e is IllegalArgumentException) "INVALID_NARRATION" else "MODEL_REQUEST_FAILED") }
     }
     private suspend fun startRequest(campaignId: String, turnId: String, planning: Boolean): ModelRequest? = store.transaction(campaignId) { r ->
         val t = r.turns.single { it.id == turnId }; val expected = if (planning) TurnStage.RECEIVED else TurnStage.RESOLVED

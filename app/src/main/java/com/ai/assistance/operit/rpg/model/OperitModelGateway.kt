@@ -10,6 +10,7 @@ import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.rpg.core.*
 import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.AppLogger
+import com.ai.assistance.operit.util.ChatMarkupRegex
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -21,7 +22,7 @@ class OperitModelGateway(private val context: Context, private val manager: Mode
 
     private suspend fun run(request: ModelRequest): ModelReply = AppLogger.withPrivateLogging { withContext(Dispatchers.IO) {
         val original = manager.getModelConfig(request.configuration.configurationId)
-            ?: error("模型配置已删除，请在本轮结束后重新选择")
+            ?: error("模型配置已删除，请恢复本轮使用的模型配置")
         require(original.apiProviderTypeId == request.configuration.providerId &&
             getModelList(original.modelName).contains(request.configuration.modelId)) { "模型配置已改变" }
         require(configurationFingerprint(original, request.configuration.modelId) == request.configuration.fingerprint) { "模型连接设置已改变，请恢复原配置后继续本轮" }
@@ -46,7 +47,9 @@ class OperitModelGateway(private val context: Context, private val manager: Mode
                         require(output.length + chunk.length <= 64_000) { "模型输出过长" }
                         output.append(chunk)
                     }
-                val visible = ChatUtils.extractThinkingContent(output.toString()).first.trim()
+                val withoutMetadata = ChatMarkupRegex.removeGeminiThoughtSignatureMeta(
+                    ChatMarkupRegex.removeOpenAiResponsesProtocolMeta(output.toString()))
+                val visible = ChatUtils.extractThinkingContent(withoutMetadata).first.trim()
                 require(visible.isNotEmpty()) { "模型未返回可见内容" }
                 ModelReply(visible, Usage(service.inputTokenCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), service.outputTokenCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()))
             }

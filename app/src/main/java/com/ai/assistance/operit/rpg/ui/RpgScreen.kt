@@ -16,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,6 +47,7 @@ fun RpgScreen(
     var clueId by rememberSaveable { mutableStateOf<String?>(null) }
     var draft by rememberSaveable(state.campaign?.id) { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val history = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
@@ -97,10 +99,10 @@ fun RpgScreen(
                         { page = "rules" }, { exportFile.launch("${campaign.title}.rpgsave.zip") },
                         { importFile.launch(arrayOf("application/zip", "application/octet-stream")) })
                     "play" -> if (campaign != null) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!imeVisible) Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("${campaign.location} · ${campaign.time} · HP ${campaign.hp}/${campaign.maxHp}", style = MaterialTheme.typography.labelMedium)
                         }
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (!imeVisible) Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             listOf("人物", "线索", "地点").forEach { name ->
                                 TextButton(onClick = { keyboard?.hide(); clueId = null; panel = name }) { Text(if (name == "线索") "$name ${campaign.clues.size}" else name) }
                             }
@@ -131,13 +133,13 @@ fun RpgScreen(
                         }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f),
-                                placeholder = { Text(if (campaign.ending == null) "你想做什么？" else "询问规则或回顾故事") }, maxLines = 3, enabled = !state.busy,
-                                isError = draft.length > 2000,
-                                supportingText = { if (draft.length > 2000) Text("行动最多 2000 字，请缩短后发送。") })
+                                placeholder = { Text(if (campaign.ending == null) "你想做什么？" else "询问规则或回顾故事") }, maxLines = if (imeVisible) 2 else 3, enabled = !state.busy,
+                                isError = draft.length > 2000)
                             Button(onClick = { val text = draft.trim(); if (text.isNotEmpty()) { controller.submit(text); draft = ""; keyboard?.hide() } },
                                 enabled = campaign.canAct && !state.busy && draft.isNotBlank() && draft.length <= 2000 && campaign.modelId != null,
                                 modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
                         }
+                        if (draft.length > 2000) Text("行动最多 2000 字，请缩短后发送。", Modifier.padding(horizontal = 28.dp), color = Clay, style = MaterialTheme.typography.bodySmall)
                         if (campaign.modelId == null) TextButton(onClick = { page = "settings" }, modifier = Modifier.padding(horizontal = 28.dp)) { Text("请先为本战役选择模型") }
                     }
                 }

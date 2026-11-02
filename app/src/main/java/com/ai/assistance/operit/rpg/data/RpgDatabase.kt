@@ -58,6 +58,7 @@ class RoomGameStore(private val database: RpgDatabase) : GameStore {
 }
 
 internal fun validateRecord(r: CampaignRecord) {
+    RainyDock.validate(r.state)
     require(r.id.isNotBlank() && r.title.isNotBlank() && r.title.length <= 100)
     require(r.scenarioId == "rainy-dock-v1" && r.scenarioVersion == "1.0.0" && r.scenarioHash == RainyDock.hash && r.rulesVersion == "prototype-d100-v1")
     require(r.state.hp in 0..r.state.maxHp && r.state.maxHp == 6 && r.state.tick >= 0)

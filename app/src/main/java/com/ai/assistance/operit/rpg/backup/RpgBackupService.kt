@@ -22,7 +22,7 @@ import java.util.zip.ZipOutputStream
 @Serializable private data class Narration(val turnId: String, val text: String)
 
 /** Complete GM archive, including scenario state. No provider configuration or request attempts. */
-class RpgBackupService(private val store: GameStore) {
+class RpgBackupService(private val store: GameStore, private val tempDirectory: File? = null) {
     companion object {
         val UNBOUND = ModelConfiguration("UNBOUND", "UNBOUND", "UNBOUND", "UNBOUND")
         private const val COMPRESSED_LIMIT = 10 * 1024 * 1024
@@ -59,7 +59,7 @@ class RpgBackupService(private val store: GameStore) {
 
     suspend fun preview(input: InputStream): CampaignRecord = withContext(Dispatchers.IO) {
         val bytes = boundedRead(input, COMPRESSED_LIMIT)
-        val file = File.createTempFile("rpg-import-", ".zip")
+        val file = File.createTempFile("rpg-import-", ".zip", tempDirectory)
         try {
             file.outputStream().use { it.write(bytes) }
             val data = linkedMapOf<String, ByteArray>()
