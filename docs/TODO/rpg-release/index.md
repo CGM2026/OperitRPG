@@ -31,7 +31,7 @@ fork: https://github.com/CGM2026/OperitRPG
 
 ## 检查记录
 
-本地通过全部 workflow YAML 解析、发布流程内嵌 Python 语法检查、15 段发布 shell 脚本的 `bash -n` 和 `git diff --check`。独立 JVM 合跑 42 项测试全部通过，包括核心 22、备份 9、更新 manifest/地址/重定向策略 5、下载 SHA256/长度验证 4、私密日志协程隔离 2。真实 AppLogger 文件输出/Logcat 守卫测试纳入 app CI。
+本地通过全部 workflow YAML 解析、发布流程内嵌 Python 语法检查、15 段发布 shell 脚本的 `bash -n` 和 `git diff --check`。使用仓库内 `rpg-core/extra-tests.init.gradle` 直接从原文件合跑 46 项 JVM 测试全部通过，包括核心 26、备份 9、更新 manifest/地址/重定向策略 5、下载 SHA256/长度验证 4、私密日志协程隔离 2。脚本不使用临时源码快照、不加载 Android manager 或 UI；真实 AppLogger 文件输出/Logcat 守卫测试纳入 app CI。
 
 本机缺少完整 Android SDK/NDK，Android 编译与手机安装验证由首轮 Actions 产物和设备验收完成。
 

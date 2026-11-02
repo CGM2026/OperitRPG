@@ -8,6 +8,14 @@
 gradlew.bat -p rpg-core test --console=plain
 ```
 
+连同 app 内的纯 JVM 备份、更新校验和私密日志作用域一起测试：
+
+```text
+gradlew.bat -p rpg-core -I extra-tests.init.gradle test --console=plain -Pkotlin.compiler.execution.strategy=in-process -Pkotlin.incremental=false
+```
+
+该可选 init script 直接筛选仓库内的原始文件，不复制源码，也不加载 Android 更新管理器、UI 或真实 AppLogger。org.json 仅添加到本次独立测试构建；正常 Android 构建不受影响。2026-11-02 实际合跑 46 项全部通过：核心 26、备份 9、更新与日志作用域 11。
+
 `GameStore.transaction` 必须把 aggregate 的读取、校验、变更和保存放进同一数据库事务；函数块中没有网络请求。内存实现通过编码副本模拟事务回滚，Android 版本必须另行验证磁盘事务与进程恢复。
 
 `TurnCoordinator` 是状态变更入口。自由输入用 `submit`；UI 已明确选择的移动、治疗等用 `submitAction`，直接走同一白名单与结算路径。按 clientMessageId 去重。重复结算读取原结果，叙述失败仅重试叙述。恢复不启动模型调用。

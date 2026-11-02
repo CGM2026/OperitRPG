@@ -28,6 +28,7 @@ AI 只识别行动与生成叙述，程序执行检定和状态变化。已提�
 ## 开发与验收
 
 - [实现与验收进度](docs/TODO/rpg_prototype_v01/index.md)
+- [手机验收步骤与反馈模板](docs/TODO/rpg_prototype_v01/ACCEPTANCE.md)
 - [纯 Kotlin 核心与独立测试](rpg-core/README.md)
 - [发布配置](docs/TODO/rpg-release/index.md)
 - [上游构建指南](docs/doc-src/dev-core/BUILDING.md)

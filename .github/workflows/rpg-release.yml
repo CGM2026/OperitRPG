@@ -136,6 +136,9 @@ jobs:
             --archives "$MANUAL_DEPS_DIR" \
             --repository "$GITHUB_WORKSPACE"
 
+          mkdir -p build-evidence
+          find "$MANUAL_DEPS_DIR" -type f -name '*.zip' -exec sha256sum {} \; > build-evidence/dependency-sha256.txt
+
       # Save validated archives immediately, independently of later Android build results.
       - name: Save prepared Android dependencies
         if: steps.cache-manual-deps.outputs.cache-hit != 'true'
@@ -321,6 +324,8 @@ jobs:
           path: |
             app/build/reports/**
             rpg-core/build/reports/**
+            app/schemas/**
+            build-evidence/**
           if-no-files-found: warn
 
       - name: Remove signing material

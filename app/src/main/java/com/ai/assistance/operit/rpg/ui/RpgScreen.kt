@@ -160,7 +160,7 @@ fun RpgScreen(
                             HorizontalDivider()
                             Text("背包", style = MaterialTheme.typography.titleMedium)
                             campaign.inventory.forEach { DetailBlock(it) }
-                            Button(onClick = controller::useBandage, enabled = campaign.canUseBandage && campaign.canAct && !state.busy) { Text("使用绷带") }
+                            Button(onClick = controller::useBandage, enabled = campaign.canUseBandage && campaign.canAct && campaign.modelId != null && !state.busy) { Text("使用绷带") }
                             if (!campaign.canUseBandage) Text(if (campaign.ending != null) "故事已结束" else campaign.bandageReason, style = MaterialTheme.typography.bodySmall)
                             if (!campaign.canAct) Text("本轮完成后可操作", style = MaterialTheme.typography.bodySmall)
                         }
@@ -183,7 +183,7 @@ fun RpgScreen(
                             Text("当前：${campaign.location}", style = MaterialTheme.typography.titleMedium)
                             campaign.locations.forEach { location ->
                                 DetailBlock(location)
-                                OutlinedButton(onClick = { controller.move(location.id); panel = null }, enabled = location.actionEnabled && campaign.canAct && campaign.ending == null && !state.busy) { Text(if (location.actionEnabled) "前往${location.title}" else "暂不可进入") }
+                                OutlinedButton(onClick = { controller.move(location.id); panel = null }, enabled = location.actionEnabled && campaign.canAct && campaign.modelId != null && campaign.ending == null && !state.busy) { Text(if (location.actionEnabled) "前往${location.title}" else "暂不可进入") }
                             }
                             if (campaign.ending != null) Text("故事已结束，可回顾已知地点。", style = MaterialTheme.typography.bodySmall)
                             if (!campaign.canAct) Text("本轮完成后可操作", style = MaterialTheme.typography.bodySmall)
@@ -252,7 +252,7 @@ private fun ModelPicker(models: List<RpgModelOption>, selected: String?, enabled
             }
         }
     }
-    TextButton(onClick = configure) { Text("打开 Operit 模型设置") }
+    TextButton(onClick = configure, enabled = enabled) { Text("打开 Operit 模型设置") }
 }
 
 @Composable

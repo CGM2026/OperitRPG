@@ -12,6 +12,7 @@ import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.ChatMarkupRegex
 import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
 import java.util.concurrent.ConcurrentHashMap
 
 class OperitModelGateway(private val context: Context, private val manager: ModelConfigManager) : ModelGateway {
@@ -36,8 +37,17 @@ class OperitModelGateway(private val context: Context, private val manager: Mode
         check(active.putIfAbsent(request.attemptId, service) == null)
         try {
             withTimeout(60_000) {
-                val history = listOf(PromptTurn(PromptTurnKind.SYSTEM, request.systemPrompt), PromptTurn(PromptTurnKind.USER, request.userPrompt))
-                require(service.calculateInputTokens(history, emptyList()) <= 12_000) { "本轮上下文超过上限" }
+                var prompt = request.userPrompt
+                fun turns() = listOf(PromptTurn(PromptTurnKind.SYSTEM, request.systemPrompt), PromptTurn(PromptTurnKind.USER, prompt))
+                var history = turns()
+                while (service.calculateInputTokens(history, emptyList()) > 12_000) {
+                    val context = RpgJson.instance.parseToJsonElement(prompt).jsonObject
+                    val past = context.getValue("history").jsonArray
+                    require(past.isNotEmpty()) { "本轮必要上下文超过上限，请缩短输入" }
+                    // Only remove oldest historical turns; current state and committed result remain intact.
+                    prompt = JsonObject(context + ("history" to JsonArray(past.drop(1)))).toString()
+                    history = turns()
+                }
                 val output = StringBuilder()
                 service.sendMessage(context = context, chatHistory = history,
                     modelParameters = listOf(ModelParameter("max_tokens", "最大输出", "max_tokens", defaultValue = request.maxOutputTokens,
