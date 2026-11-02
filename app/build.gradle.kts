@@ -394,11 +394,12 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.ai.assistance.operit"
+        applicationId = "io.github.cgm2026.operitrpg"
         minSdk = 26
         targetSdk = 34
-        versionCode = 51
-        versionName = "1.12.2"
+        versionCode = providers.gradleProperty("rpgVersionCode").orElse("1").get().toInt()
+        versionName = providers.gradleProperty("rpgVersionName").orElse("0.1.0").get()
+        resValue("string", "rpg_app_name", "雨夜跑团")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -422,6 +423,7 @@ android {
         val releaseSigningConfig = signingConfigs.findByName("release")
 
         release {
+            resValue("string", "app_name", "雨夜跑团")
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(
@@ -435,7 +437,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             signingConfig = signingConfigs.getByName("debug")
-            resValue("string", "app_name", "Operit Debug")
+            resValue("string", "app_name", "雨夜跑团 开发版")
         }
         create("clone") {
             initWith(getByName("debug"))
@@ -552,8 +554,13 @@ val signRotatedNightlyApk by tasks.registering {
     }
 }
 
-tasks.matching { it.name == "assembleRelease" }.configureEach {
-    finalizedBy(signRotatedReleaseApk)
+// This fork has its own permanent signing identity; upstream rotation keys do not apply.
+tasks.matching { it.name == "packageRelease" || it.name == "bundleRelease" }.configureEach {
+    doFirst {
+        require(android.signingConfigs.findByName("release") != null) {
+            "Release requires RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS and RELEASE_KEY_PASSWORD in local.properties"
+        }
+    }
 }
 
 tasks.matching { it.name == "assembleNightly" }.configureEach {
@@ -575,7 +582,14 @@ kotlin {
     }
 }
 
+kapt {
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+}
+
 dependencies {
+    implementation(project(":rpg-core"))
     implementation("com.github.jelmerk:hnswlib-core:1.2.1")
     implementation(project(":dragonbones"))
     implementation(project(":terminal"))

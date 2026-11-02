@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   close-title-only:
+    if: github.repository != 'CGM2026/OperitRPG'
     runs-on: ubuntu-latest
     steps:
       - name: Close issues without a body or comments

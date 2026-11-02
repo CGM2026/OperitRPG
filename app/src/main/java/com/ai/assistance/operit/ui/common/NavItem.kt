@@ -21,6 +21,7 @@ import com.ai.assistance.operit.R
 
 // 应用导航项
 sealed class NavItem(val route: String, val titleResId: Int, val icon: ImageVector) {
+        object Rpg : NavItem("rpg", R.string.nav_rpg, Icons.Default.Description)
         object AiChat : NavItem("ai_chat", R.string.nav_ai_chat, Icons.Default.Email)
         object ShizukuCommands :
                 NavItem("shizuku_commands", R.string.shizuku_commands, Icons.Default.Build)

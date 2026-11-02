@@ -81,7 +81,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher_simple"
-        android:label="@string/app_name"
+        android:label="@string/rpg_app_name"
         android:resizeableActivity="true"
         android:roundIcon="@mipmap/ic_launcher_simple_round"
         android:supportsRtl="true"
@@ -213,7 +213,7 @@
         <activity
             android:name=".ui.main.MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
+            android:label="@string/rpg_app_name"
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout"
             android:windowSoftInputMode="adjustPan"
             android:theme="@style/Theme.Operit"
@@ -480,7 +480,7 @@
         <!-- Voice Interaction Service for system default assistant -->
         <service
             android:name=".services.assistant.OperitVoiceInteractionService"
-            android:label="@string/app_name"
+            android:label="@string/rpg_app_name"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true">
             <meta-data

@@ -1,0 +1,17 @@
+# Core contract
+
+Package `com.ai.assistance.operit.rpg.core` (flat imports). Android depends on `:rpg-core`.
+
+`GameStore` has `suspend fun <T> transaction(campaignId: String, block: (CampaignRecord) -> T): T`, `suspend fun create(record: CampaignRecord)`, `suspend fun list(): List<CampaignRecord>`. The block runs under one database transaction; load the complete record, call block, persist the changed record atomically. Never do network inside it. `CampaignRecord` is a serializable mutable aggregate containing `state`, `turns`, `events`, `model` and metadata. Room may persist aggregate JSON plus indexed metadata; uniqueness of clientMessageId/ordinal and sequence is checked by core inside transaction. Return detached decoded objects from reads/list. Missing campaign throws NoSuchElementException.
+
+Core JSON: `RpgJson.instance`; state, records, turns, events and results use kotlinx serialization. Core `TurnCoordinator(store, gateway, dice=SecureRandomDice(), clock=SystemClock, ids=UuidGenerator)` owns all transitions. Public methods: `createCampaign(title, playerName, model): String`, `submit(campaignId, clientMessageId, expectedRevision, text): TurnOutcome`, `confirmPlan(campaignId, turnId, expectedPlanHash)`, `resolvePrepared(campaignId, turnId, expectedRevision)`, `retryStage(campaignId, turnId, expectedStage)`, `cancelUnresolved(campaignId, turnId)`, `recover(campaignId)`, `publicView(campaignId)`, `switchModel(campaignId, model)`.
+
+`submit` runs plan and, for unambiguous valid plans, resolve+narrate. Confirmation pauses. `retryStage` explicitly resumes only the stored stage. Each turn captures `ModelConfiguration` (configurationId, providerId, modelId, fingerprint); no keys. `ModelGateway` has `suspend plan(ModelRequest): ModelReply`, `suspend narrate(ModelRequest): ModelReply`, `suspend cancel(attemptId)`. Request carries attemptId, configuration, systemPrompt, userPrompt, maxOutputTokens. Reply carries text and Usage. Model gateway must enforce timeouts and use only final visible text.
+
+`submitAction(campaignId, clientMessageId, expectedRevision, actionId)` is the direct UI action entry. It validates allowedActions, freezes plan/hash/model and resolves+narrates; it does not call planner. Deduplication and active-turn rules are identical to submit.
+
+UI reads `PublicCampaignView` only: id/title/playerName/hp/maxHp/tick/location/adjacentLocations/inventory/clues/facts/status/revision/turns/allowedActions. Public turns include input/stage/error/plan public intent/question/result/narration; no hidden flags. `TurnOutcome` has code (APPLIED, ALREADY_APPLIED, NEEDS_CONFIRMATION, BUSY, STALE_REVISION, INVALID_PLAN, FAILED, CANCELLED), turnId, message. `TurnStage` enum RECEIVED, PLANNING, NEEDS_CONFIRMATION, PREPARED, RESOLVED, NARRATING, COMPLETE, CANCELLED.
+
+`RainyDock` is the authoritative built-in catalog; `initialState`, `allowedActions`, `validate`, `resolve`, `replay`, `publicView`. Events contain only committed mechanical changes. Model context builders use public and scoped NPC DTOs, never the internal aggregate. `FakeModelGateway` is an explicit opt-in deterministic implementation.
+
+[DONE] Core built and 21 standalone JVM tests passed on 2026-11-02. Resource contract: one ACTION_RESOLVED event per world action, optional public roll; replay deterministically recalculates the entire action including time and ending. No separate redundant dice/time events.

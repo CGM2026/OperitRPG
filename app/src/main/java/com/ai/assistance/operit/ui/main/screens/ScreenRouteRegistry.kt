@@ -110,6 +110,14 @@ object ScreenRouteRegistry {
     private val hostEntryDefinitions: List<HostNavigationEntryDefinition> =
         listOf(
             hostEntryDefinition(
+                entryId = "main.rpg",
+                screen = Screen.Rpg,
+                surface = NavigationSurface.MAIN_SIDEBAR_AI,
+                launchNavItem = NavItem.Rpg,
+                icon = NavItem.Rpg.icon,
+                order = 40
+            ),
+            hostEntryDefinition(
                 entryId = "main.ai_chat",
                 screen = Screen.AiChat,
                 surface = NavigationSurface.MAIN_SIDEBAR_AI,

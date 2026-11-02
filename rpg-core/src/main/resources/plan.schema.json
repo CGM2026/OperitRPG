@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:operit-rpg:plan:v1",
+  "title": "RPG prototype planner output v1",
+  "description": "Only an intention proposal. Runtime must check campaign status, allowedActions, action definition and state revision before execution.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "action_id", "requires_confirmation", "public_intent"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "action"},
+        "action_id": {
+          "type": "string",
+          "enum": [
+            "move.yard_office", "move.office_yard", "move.yard_dock", "move.dock_yard",
+            "move.office_archive", "move.archive_office", "talk.keeper_delivery",
+            "talk.clerk_access", "inspect.office_note", "climb.archive_window",
+            "inspect.archive_ledger", "talk.boatman_tide", "inspect.dock_marks",
+            "rescue.boatman_help", "use.bandage", "wait"
+          ]
+        },
+        "requires_confirmation": {"type": "boolean"},
+        "public_intent": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "npc_id"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "dialogue"},
+        "npc_id": {"type": "string", "enum": ["keeper", "clerk", "boatman"]}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "ooc"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "question"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "clarify"},
+        "question": {"type": "string", "minLength": 1, "maxLength": 300}
+      }
+    }
+  ]
+}

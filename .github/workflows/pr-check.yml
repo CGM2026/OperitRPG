@@ -25,6 +25,7 @@ env:
 
 jobs:
   fast:
+    if: github.repository != 'CGM2026/OperitRPG'
     name: Fast checks
     runs-on: ubuntu-24.04
     timeout-minutes: 240
@@ -268,9 +269,7 @@ jobs:
   android_build:
     name: Android build
     needs: fast
-    if: >-
-      needs.fast.result == 'success' &&
-      needs.fast.outputs.android_full == 'true'
+    if: github.repository != 'CGM2026/OperitRPG' && (needs.fast.result == 'success' && needs.fast.outputs.android_full == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 240
 
@@ -414,9 +413,7 @@ jobs:
   android_tests:
     name: Android JVM tests
     needs: fast
-    if: >-
-      needs.fast.result == 'success' &&
-      (needs.fast.outputs.android_jvm == 'true' || needs.fast.outputs.android_full == 'true')
+    if: github.repository != 'CGM2026/OperitRPG' && (needs.fast.result == 'success' && (needs.fast.outputs.android_jvm == 'true' || needs.fast.outputs.android_full == 'true'))
     runs-on: ubuntu-24.04
     timeout-minutes: 240
 
@@ -559,7 +556,7 @@ jobs:
   candidate:
     name: Candidate checks
     needs: [fast, android_build, android_tests]
-    if: always()
+    if: github.repository != 'CGM2026/OperitRPG' && (always())
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 

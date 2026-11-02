@@ -63,6 +63,7 @@ env:
 
 jobs:
   build:
+    if: github.repository != 'CGM2026/OperitRPG'
     name: Build Android artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 240

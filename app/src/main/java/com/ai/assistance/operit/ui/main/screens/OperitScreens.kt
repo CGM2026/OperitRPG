@@ -93,6 +93,7 @@ import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowListScreen
 import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowDetailScreen
 import com.ai.assistance.operit.ui.main.PendingChatDraftHandler
 import com.ai.assistance.operit.ui.main.navigation.AppRouterGateway
+import com.ai.assistance.operit.rpg.integration.RpgRoute
 
 // 路由配置类
 typealias ScreenNavigationHandler = (Screen) -> Unit
@@ -138,6 +139,21 @@ sealed class Screen(
             onGestureConsumed: (Boolean) -> Unit
     ) {
         // 子类实现具体内容
+    }
+
+    data object Rpg : Screen(navItem = NavItem.Rpg, titleRes = R.string.nav_rpg, usesRouteViewModelStore = true) {
+        @Composable
+        override fun Content(
+            navController: NavController,
+            navigateTo: ScreenNavigationHandler,
+            onGoBack: () -> Unit,
+            hasBackgroundImage: Boolean,
+            onLoading: (Boolean) -> Unit,
+            onError: (String) -> Unit,
+            onGestureConsumed: (Boolean) -> Unit
+        ) {
+            RpgRoute(onOpenModelSettings = { navigateTo(ModelConfig) })
+        }
     }
 
     // Main screens (primary)

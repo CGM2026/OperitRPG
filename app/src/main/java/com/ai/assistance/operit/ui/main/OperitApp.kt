@@ -84,7 +84,7 @@ private data class NetworkStateSnapshot(
 
 @Composable
 fun OperitApp(
-    initialNavItem: NavItem = NavItem.AiChat,
+    initialNavItem: NavItem = NavItem.Rpg,
     toolHandler: AIToolHandler? = null,
     shortcutNavRequest: NavItem? = null,
     shortcutNavRequestId: Long = 0L,
@@ -275,10 +275,10 @@ fun OperitApp(
             isNavigatingBack = true
             navigationTransitionSource = NavigationTransitionSource.DEFAULT
             routerState.pop()
-        } else if (routerState.currentEntry.routeId != AppRouteCatalog.toEntry(Screen.AiChat).routeId) {
+        } else if (routerState.currentEntry.routeId != AppRouteCatalog.toEntry(Screen.Rpg).routeId) {
             isNavigatingBack = true
             navigationTransitionSource = NavigationTransitionSource.DEFAULT
-            routerState.resetTo(AppRouteCatalog.toEntry(Screen.AiChat))
+            routerState.resetTo(AppRouteCatalog.toEntry(Screen.Rpg))
         }
     }
 
@@ -335,7 +335,7 @@ fun OperitApp(
         navigateTo(Screen.TokenConfig)
     }
 
-    BackHandler(enabled = currentScreen !is Screen.AiChat, onBack = { requestGoBack() })
+    BackHandler(enabled = currentScreen !is Screen.Rpg, onBack = { requestGoBack() })
 
     val canGoBack = routerState.canPop
 
@@ -366,6 +366,7 @@ fun OperitApp(
 
     val navItems = listOf(
         NavItem.AiChat,
+        NavItem.Rpg,
         NavItem.AssistantConfig,
         NavItem.Packages,
         NavItem.MemoryBase,
