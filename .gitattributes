@@ -1,0 +1,2 @@
+# Scenario identity hashes the packaged bytes; keep JSON stable across Windows and CI.
+rpg-core/src/main/resources/*.json text eol=lf

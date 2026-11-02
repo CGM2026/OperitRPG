@@ -135,10 +135,57 @@ class CoreTest {
         assertFails { ContextBuilder.validateNarration("</think>残留标签",RainyDock.initialState()) }
         assertFailsWith<InvalidPlanException> { PlanParser.parse("{\"schema_version\":1,\"kind\":\"clarify\",\"question\":\"<meta>secret</meta>\"}") }
     }
+    @Test fun explicitNarrationRebindPreservesCommittedMechanicsAndMakesNoRequest() = runBlocking {
+        val gateway=ScriptGateway("unused"); gateway.narration="<tool>failed narration</tool>"
+        val store=InMemoryGameStore(); val dice=SequenceDice(90); val c=TurnCoordinator(store,gateway,dice)
+        val id=c.createCampaign("t","林舟",model); val outcome=c.submitAction(id,"m",0,"climb.archive_window")
+        assertEquals(OutcomeCode.FAILED,outcome.code)
+        val before=store.list().single(); val turnId=outcome.turnId!!; val replacement=ModelConfiguration("replacement","fake","other","other-v1")
+        val requestsBefore=gateway.narrations
+        assertTrue(c.rebindInterruptedNarration(id,turnId,replacement))
+        val rebound=store.list().single(); val t=rebound.turns.single()
+        assertEquals(before.state,rebound.state); assertEquals(before.events,rebound.events)
+        assertEquals(before.turns.single().result,t.result); assertEquals(before.turns.single().attempts,t.attempts)
+        assertEquals(replacement,t.model); assertEquals(replacement,rebound.model); assertEquals(TurnStage.RESOLVED,t.stage); assertNull(t.attemptId)
+        assertEquals(requestsBefore,gateway.narrations); assertEquals(0,gateway.plans); assertEquals(1,dice.consumed)
+        gateway.narration="攀爬失败，你仍在院门。"
+        assertEquals(OutcomeCode.APPLIED,c.retryStage(id,turnId,TurnStage.RESOLVED).code)
+        val completed=store.list().single(); assertEquals(1,dice.consumed); assertEquals(1,completed.events.size)
+        assertEquals(90,completed.turns.single().result!!.dice!!.roll)
+        assertEquals(listOf(model.fingerprint,replacement.fingerprint),completed.turns.single().attempts.map { it.modelFingerprint })
+        assertFalse(c.rebindInterruptedNarration(id,turnId,model)); assertEquals(TurnStage.COMPLETE,completed.turns.single().stage)
+    }
+    @Test fun narrationRebindRejectsUnresolvedHealthyActiveAndCompletedTurns() = runBlocking {
+        for ((stage,hasResult,error,active) in listOf(
+            RebindCase(TurnStage.PLANNING,false,"MODEL_REQUEST_FAILED",false),
+            RebindCase(TurnStage.PREPARED,false,null,false),
+            RebindCase(TurnStage.NEEDS_CONFIRMATION,false,null,false),
+            RebindCase(TurnStage.RESOLVED,true,null,false),
+            RebindCase(TurnStage.NARRATING,true,null,true),
+            RebindCase(TurnStage.NARRATING,true,"INTERRUPTED",true),
+            RebindCase(TurnStage.COMPLETE,true,"OLD_ERROR",false)
+        )) {
+            val gateway=ScriptGateway("unused"); val store=InMemoryGameStore(); val c=TurnCoordinator(store,gateway); val id=c.createCampaign("t","林舟",model)
+            store.transaction(id) { it.turns += Turn("t",id,1,"m","规则",stage,0,model,0,plan=Plan(PlanKind.OOC),result=if(hasResult) TurnResult(publicSummary="规则") else null,errorCode=error,attempts=if(active) mutableListOf(RequestAttempt("active",stage,1,model.fingerprint)) else mutableListOf()) }
+            val before=store.list().single()
+            assertFalse(c.rebindInterruptedNarration(id,"t",model.copy(configurationId="other")),"stage=$stage error=$error active=$active")
+            assertEquals(before,store.list().single()); assertEquals(0,gateway.plans); assertEquals(0,gateway.narrations)
+        }
+    }
+    private data class RebindCase(val stage:TurnStage,val hasResult:Boolean,val error:String?,val active:Boolean)
+    @Test fun stoppedNarrationCanRebindOnlyAfterAttemptIsInterrupted() = runBlocking {
+        val store=InMemoryGameStore(); val gateway=ScriptGateway("unused"); val c=TurnCoordinator(store,gateway); val id=c.createCampaign("t","林舟",model)
+        store.transaction(id) { it.turns += Turn("t",id,1,"m","规则",TurnStage.NARRATING,0,model,0,attemptId="active",plan=Plan(PlanKind.OOC),result=TurnResult(publicSummary="规则"),attempts=mutableListOf(RequestAttempt("active",TurnStage.NARRATING,1,model.fingerprint))) }
+        assertFalse(c.rebindInterruptedNarration(id,"t",model.copy(configurationId="new")))
+        assertEquals(OutcomeCode.ALREADY_APPLIED,c.cancelUnresolved(id,"t").code)
+        val stopped=store.list().single().turns.single(); assertEquals("INTERRUPTED",stopped.attempts.single().status); assertEquals("INTERRUPTED",stopped.errorCode)
+        assertTrue(c.rebindInterruptedNarration(id,"t",model.copy(configurationId="new")))
+        val rebound=store.list().single().turns.single(); assertEquals("INTERRUPTED",rebound.errorCode); assertEquals(TurnStage.RESOLVED,rebound.stage); assertEquals(0,gateway.narrations)
+    }
     private class ScriptGateway(var output: String) : ModelGateway {
-        var narration="雨还在下。"; var plans=0
+        var narration="雨还在下。"; var plans=0; var narrations=0
         override suspend fun plan(request: ModelRequest): ModelReply { plans++; return ModelReply(output) }
-        override suspend fun narrate(request: ModelRequest)=ModelReply(narration)
+        override suspend fun narrate(request: ModelRequest):ModelReply { narrations++; return ModelReply(narration) }
         override suspend fun cancel(attemptId: String) = Unit
     }
 }

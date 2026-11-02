@@ -258,8 +258,9 @@ private fun ModelPicker(models: List<RpgModelOption>, selected: String?, enabled
 @Composable
 private fun CampaignSettings(state: RpgUiState, campaign: RpgPlayState, controller: RpgUiController, configure: () -> Unit, rules: () -> Unit, onExport: () -> Unit, onImport: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ModelPicker(state.models, campaign.modelId, campaign.canAct && !state.busy, controller::selectModel, configure)
-        if (!campaign.canAct) Notice("当前回合尚未完成，暂不能切换模型或导出存档。")
+        if (campaign.canRebindNarration) Notice("叙述已中断。你可以明确选择另一模型，再返回继续叙述；已保存的检定与资源变化保持不变。")
+        ModelPicker(state.models, campaign.modelId, (campaign.canAct || campaign.canRebindNarration) && !state.busy, controller::selectModel, configure)
+        if (!campaign.canAct) Notice(if (campaign.canRebindNarration) "请完成本轮叙述后再导出存档。" else "当前回合尚未完成，暂不能切换模型或导出存档。")
         HorizontalDivider()
         OutlinedButton(onClick = rules, modifier = Modifier.fillMaxWidth()) { Text("本团规则") }
         OutlinedButton(onClick = onExport, enabled = campaign.canAct && !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出存档") }

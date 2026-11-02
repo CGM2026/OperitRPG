@@ -47,7 +47,8 @@ data class RpgPlayState(
     val canUseBandage: Boolean = false,
     val bandageReason: String = "已用完",
     val ending: String? = null,
-    val pendingNotice: String? = null
+    val pendingNotice: String? = null,
+    val canRebindNarration: Boolean = false
 )
 interface RpgUiController {
     val state: StateFlow<RpgUiState>

@@ -15,6 +15,17 @@ class TurnCoordinator(private val store: GameStore, private val gateway: ModelGa
     suspend fun switchModel(campaignId: String, model: ModelConfiguration): Boolean = store.transaction(campaignId) { r ->
         if (r.turns.any { !terminal(it.stage) }) false else { r.model = model; true }
     }
+    /** Explicit recovery selection after narration failed; never changes committed mechanics. */
+    suspend fun rebindInterruptedNarration(campaignId: String, turnId: String, newModel: ModelConfiguration): Boolean = store.transaction(campaignId) { r ->
+        val t = r.turns.single { it.id == turnId }
+        if (t.result == null || t.errorCode == null || t.stage !in setOf(TurnStage.RESOLVED, TurnStage.NARRATING) || t.attempts.any { it.status == "ACTIVE" }) return@transaction false
+        t.model = newModel
+        t.stage = TurnStage.RESOLVED
+        t.attemptId = null
+        r.model = newModel
+        r.updatedAt = clock.now()
+        true
+    }
     /** UI-selected actions use the same transaction/rules path without a paid planning request. */
     suspend fun submitAction(campaignId: String, clientMessageId: String, expectedRevision: Long, actionId: String): TurnOutcome {
         if (clientMessageId.isBlank()) return TurnOutcome(OutcomeCode.INVALID_PLAN, message = "CLIENT_MESSAGE_ID_REQUIRED")

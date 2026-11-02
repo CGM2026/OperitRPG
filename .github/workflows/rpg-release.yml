@@ -257,12 +257,22 @@ jobs:
               output.write(f'RPG_VERSION={version}\nRPG_CODE={code}\nRPG_TAG=rpg-v{version}\n')
           PY
 
-      - name: Build complete signed APK
+      - name: Compile and test RPG integration
         shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :rpg-core:test :app:testReleaseUnitTest --tests 'com.ai.assistance.operit.rpg.*' :app:assembleRelease \
+          ./gradlew :rpg-core:test :app:testReleaseUnitTest --tests 'com.ai.assistance.operit.rpg.*' \
+            -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
+            -Pkotlin.compiler.execution.strategy=in-process \
+            '-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' \
+            --max-workers=2 --no-parallel --stacktrace --no-daemon
+
+      - name: Build complete signed APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleRelease \
             -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
             -Pkotlin.compiler.execution.strategy=in-process \
             '-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' \

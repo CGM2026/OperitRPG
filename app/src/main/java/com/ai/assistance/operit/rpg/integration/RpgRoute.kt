@@ -103,7 +103,12 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
     }
     override fun selectModel(modelId: String) = launchOperation {
         val config = configurations[modelId] ?: error("模型配置不可用")
-        check(engine.switchModel(current().id, config)) { "请先完成当前回合" }
+        val view = current()
+        val pending = view.turns.lastOrNull { it.stage !in terminal }
+        if (pending?.result != null && pending.errorCode != null) {
+            check(engine.rebindInterruptedNarration(view.id, pending.id, config)) { "当前请求尚在进行" }
+            message("已为中断的叙述选择模型。返回游玩并点击继续叙述，检定结果保持不变。")
+        } else check(engine.switchModel(view.id, config)) { "请先完成当前回合" }
     }
     override fun previewImport(uri: Uri) = launchOperation {
         val record = try { withContext(Dispatchers.IO) {
@@ -211,7 +216,8 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
             canUseBandage = pending == null && v.allowedActions.any { it.id == "use.bandage" },
             bandageReason = if ((v.inventory["bandage"] ?: 0) == 0) "已用完" else if (v.hp == v.maxHp) "生命已满" else "本轮完成后可使用",
             ending = ending,
-            pendingNotice = pending?.let { if (it.result != null) "本轮结果已保存，请完成叙述后继续。" else "本轮尚未完成。" })
+            pendingNotice = pending?.let { if (it.result != null) "本轮结果已保存，请完成叙述后继续。" else "本轮尚未完成。" },
+            canRebindNarration = pending?.let { it.result != null && it.errorCode != null } == true)
     }
     private fun stageText(stage: TurnStage) = when (stage) {
         TurnStage.RECEIVED, TurnStage.PLANNING -> "正在理解行动"

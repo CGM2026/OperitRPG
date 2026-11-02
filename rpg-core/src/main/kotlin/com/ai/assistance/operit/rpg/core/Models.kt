@@ -31,7 +31,7 @@ data class ModelRequest(val attemptId: String, val configuration: ModelConfigura
 @Serializable data class RequestAttempt(val id: String, val stage: TurnStage, val attemptNo: Int, val modelFingerprint: String, var status: String = "ACTIVE", var usage: Usage? = null, var durationMs: Long = 0, var errorCode: String? = null)
 @Serializable data class Turn(
     val id: String, val campaignId: String, val ordinal: Int, val clientMessageId: String,
-    val inputText: String, var stage: TurnStage, val baseRevision: Long, val model: ModelConfiguration,
+    val inputText: String, var stage: TurnStage, val baseRevision: Long, var model: ModelConfiguration,
     val createdAt: Long, var attemptId: String? = null, var plan: Plan? = null,
     var planHash: String? = null, var actionHash: String? = null, var result: TurnResult? = null,
     var narration: String? = null, var errorCode: String? = null,
