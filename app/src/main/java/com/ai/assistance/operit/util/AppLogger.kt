@@ -21,6 +21,9 @@ import java.util.regex.Pattern
  */
 object AppLogger {
 
+    /** Suppress both Logcat and file output only for this request and its child coroutines. */
+    suspend fun <T> withPrivateLogging(block: suspend () -> T): T = PrivateLogScope.run(block)
+
     // Mirror com.ai.assistance.operit.util.AppLogger priority constants
     const val VERBOSE: Int = Log.VERBOSE
     const val DEBUG: Int = Log.DEBUG
@@ -164,95 +167,110 @@ object AppLogger {
 
     @JvmStatic
     fun v(tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(VERBOSE, tag, msg, null)
         return if (enableSystemLog) Log.v(tag, msg) else 0
     }
 
     @JvmStatic
     fun v(tag: String, msg: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(VERBOSE, tag, msg, tr)
         return if (enableSystemLog) Log.v(tag, msg, tr) else 0
     }
 
     @JvmStatic
     fun d(tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(DEBUG, tag, msg, null)
         return if (enableSystemLog) Log.d(tag, msg) else 0
     }
 
     @JvmStatic
     fun d(tag: String, msg: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(DEBUG, tag, msg, tr)
         return if (enableSystemLog) Log.d(tag, msg, tr) else 0
     }
 
     @JvmStatic
     fun i(tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(INFO, tag, msg, null)
         return if (enableSystemLog) Log.i(tag, msg) else 0
     }
 
     @JvmStatic
     fun i(tag: String, msg: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(INFO, tag, msg, tr)
         return if (enableSystemLog) Log.i(tag, msg, tr) else 0
     }
 
     @JvmStatic
     fun w(tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(WARN, tag, msg, null)
         return if (enableSystemLog) Log.w(tag, msg) else 0
     }
 
     @JvmStatic
     fun w(tag: String, msg: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(WARN, tag, msg, tr)
         return if (enableSystemLog) Log.w(tag, msg, tr) else 0
     }
 
     @JvmStatic
     fun w(tag: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(WARN, tag, "", tr)
         return if (enableSystemLog) Log.w(tag, tr) else 0
     }
 
     @JvmStatic
     fun e(tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(ERROR, tag, msg, null)
         return if (enableSystemLog) Log.e(tag, msg) else 0
     }
 
     @JvmStatic
     fun e(tag: String, msg: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(ERROR, tag, msg, tr)
         return if (enableSystemLog) Log.e(tag, msg, tr) else 0
     }
 
     @JvmStatic
     fun wtf(tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(ASSERT, tag, msg, null)
         return if (enableSystemLog) Log.wtf(tag, msg) else 0
     }
 
     @JvmStatic
     fun wtf(tag: String, msg: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(ASSERT, tag, msg, tr)
         return if (enableSystemLog) Log.wtf(tag, msg, tr) else 0
     }
 
     @JvmStatic
     fun wtf(tag: String, tr: Throwable): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(ASSERT, tag, "", tr)
         return if (enableSystemLog) Log.wtf(tag, tr) else 0
     }
 
     @JvmStatic
     fun isLoggable(tag: String, level: Int): Boolean {
-        return enableSystemLog && Log.isLoggable(tag, level)
+        return !PrivateLogScope.isPrivate && enableSystemLog && Log.isLoggable(tag, level)
     }
 
     @JvmStatic
     fun println(priority: Int, tag: String, msg: String): Int {
+        if (PrivateLogScope.isPrivate) return 0
         writeToFile(priority, tag, msg, null)
         return if (enableSystemLog) Log.println(priority, tag, msg) else 0
     }

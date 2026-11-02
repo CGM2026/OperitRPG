@@ -17,8 +17,6 @@ import java.io.File
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
-data class RpgRelease(val version: String, val code: Long, val notes: String, val url: String, val bytes: Long, val sha256: String)
-
 /** Every update remains tied to this repository, package and installed signing certificate. */
 class RpgUpdateManager(private val context: Context) {
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)

@@ -42,6 +42,10 @@ class FakeModelGateway : ModelGateway {
         val text = when {
             id != null -> "{\"schema_version\":1,\"kind\":\"action\",\"action_id\":\"$id\",\"requires_confirmation\":${input.contains("然后") || input.contains("再去")},\"public_intent\":\"${RainyDock.actions.single { it.id == id }.description}\"}"
             input.contains("救人") || input.contains("救阿远") -> "{\"schema_version\":1,\"kind\":\"clarify\",\"question\":\"需要先核实阿远所在的货棚。你想先调查哪里？\"}"
+            input.contains("闲聊") && RpgJson.instance.parseToJsonElement(request.userPrompt).jsonObject.containsKey("npcKnowledge") -> {
+                val npc = RpgJson.instance.parseToJsonElement(request.userPrompt).jsonObject.getValue("npcKnowledge").jsonObject.getValue("id").jsonPrimitive.content
+                "{\"schema_version\":1,\"kind\":\"dialogue\",\"npc_id\":\"$npc\"}"
+            }
             else -> "{\"schema_version\":1,\"kind\":\"ooc\"}"
         }
         return ModelReply(text)

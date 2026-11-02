@@ -14,4 +14,4 @@ UI reads `PublicCampaignView` only: id/title/playerName/hp/maxHp/tick/location/a
 
 `RainyDock` is the authoritative built-in catalog; `initialState`, `allowedActions`, `validate`, `resolve`, `replay`, `publicView`. Events contain only committed mechanical changes. Model context builders use public and scoped NPC DTOs, never the internal aggregate. `FakeModelGateway` is an explicit opt-in deterministic implementation.
 
-[DONE] Core built and 21 standalone JVM tests passed on 2026-11-02. Resource contract: one ACTION_RESOLVED event per world action, optional public roll; replay deterministically recalculates the entire action including time and ending. No separate redundant dice/time events.
+[DONE] Core built with Java17 bytecode and 22 standalone JVM tests passed on 2026-11-02. Resource contract: one ACTION_RESOLVED event per world action, optional public roll; replay deterministically recalculates the entire action including time and ending. No separate redundant dice/time events.

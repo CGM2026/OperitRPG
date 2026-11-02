@@ -83,7 +83,7 @@ fun RpgScreen(
                 state.message?.let { message ->
                     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
                         Row(Modifier.padding(12.dp)) {
-                            Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            Text(message, Modifier.weight(1f).heightIn(max = 120.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)
                             TextButton(onClick = controller::dismissMessage) { Text("关闭") }
                         }
                     }
@@ -129,11 +129,11 @@ fun RpgScreen(
                             Text("正在处理本轮行动", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                             TextButton(onClick = controller::stop) { Text("停止") }
                         }
-                        if (campaign.ending == null) Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f),
-                                placeholder = { Text("你想做什么？") }, maxLines = 5, enabled = !state.busy,
+                                placeholder = { Text(if (campaign.ending == null) "你想做什么？" else "询问规则或回顾故事") }, maxLines = 3, enabled = !state.busy,
                                 isError = draft.length > 2000,
-                                supportingText = if (draft.length > 2000) ({ Text("行动最多 2000 字，请缩短后发送。") }) else null)
+                                supportingText = { if (draft.length > 2000) Text("行动最多 2000 字，请缩短后发送。") })
                             Button(onClick = { val text = draft.trim(); if (text.isNotEmpty()) { controller.submit(text); draft = ""; keyboard?.hide() } },
                                 enabled = campaign.canAct && !state.busy && draft.isNotBlank() && draft.length <= 2000 && campaign.modelId != null,
                                 modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
@@ -159,7 +159,7 @@ fun RpgScreen(
                             Text("背包", style = MaterialTheme.typography.titleMedium)
                             campaign.inventory.forEach { DetailBlock(it) }
                             Button(onClick = controller::useBandage, enabled = campaign.canUseBandage && campaign.canAct && !state.busy) { Text("使用绷带") }
-                            if (!campaign.canUseBandage) Text(campaign.bandageReason, style = MaterialTheme.typography.bodySmall)
+                            if (!campaign.canUseBandage) Text(if (campaign.ending != null) "故事已结束" else campaign.bandageReason, style = MaterialTheme.typography.bodySmall)
                             if (!campaign.canAct) Text("本轮完成后可操作", style = MaterialTheme.typography.bodySmall)
                         }
                         "线索" -> {
@@ -181,15 +181,16 @@ fun RpgScreen(
                             Text("当前：${campaign.location}", style = MaterialTheme.typography.titleMedium)
                             campaign.locations.forEach { location ->
                                 DetailBlock(location)
-                                OutlinedButton(onClick = { controller.move(location.id); panel = null }, enabled = location.actionEnabled && campaign.canAct && !state.busy) { Text(if (location.actionEnabled) "前往${location.title}" else "暂不可进入") }
+                                OutlinedButton(onClick = { controller.move(location.id); panel = null }, enabled = location.actionEnabled && campaign.canAct && campaign.ending == null && !state.busy) { Text(if (location.actionEnabled) "前往${location.title}" else "暂不可进入") }
                             }
+                            if (campaign.ending != null) Text("故事已结束，可回顾已知地点。", style = MaterialTheme.typography.bodySmall)
                             if (!campaign.canAct) Text("本轮完成后可操作", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
             state.importPreview?.let { preview -> AlertDialog(onDismissRequest = controller::dismissImport,
-                title = { Text("导入为新战役") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                title = { Text("导入为新战役") }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(preview.title); Text(preview.playerName); Text(preview.detail); Text("导入后请重新选择本地模型配置。")
                 } }, confirmButton = { TextButton(onClick = controller::confirmImport, enabled = !state.busy) { Text("确认导入") } },
                 dismissButton = { TextButton(onClick = controller::dismissImport) { Text("取消") } }) }
@@ -255,11 +256,11 @@ private fun ModelPicker(models: List<RpgModelOption>, selected: String?, enabled
 @Composable
 private fun CampaignSettings(state: RpgUiState, campaign: RpgPlayState, controller: RpgUiController, configure: () -> Unit, rules: () -> Unit, onExport: () -> Unit, onImport: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ModelPicker(state.models, campaign.modelId, (campaign.canAct || campaign.ending != null) && !state.busy, controller::selectModel, configure)
-        if (!campaign.canAct && campaign.ending == null) Notice("当前回合尚未完成，暂不能切换模型或导出存档。")
+        ModelPicker(state.models, campaign.modelId, campaign.canAct && !state.busy, controller::selectModel, configure)
+        if (!campaign.canAct) Notice("当前回合尚未完成，暂不能切换模型或导出存档。")
         HorizontalDivider()
         OutlinedButton(onClick = rules, modifier = Modifier.fillMaxWidth()) { Text("本团规则") }
-        OutlinedButton(onClick = onExport, enabled = (campaign.canAct || campaign.ending != null) && !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出存档") }
+        OutlinedButton(onClick = onExport, enabled = campaign.canAct && !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出存档") }
         OutlinedButton(onClick = onImport, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导入为新战役") }
         RpgUpdateButton(Modifier.fillMaxWidth())
         Text("行动和检定自动保存到本机。完整存档包含模组信息，请自行保管。导出文件可用于备份或迁移。", style = MaterialTheme.typography.bodySmall)

@@ -73,6 +73,11 @@ class CoreTest {
     }
     @Test fun scenarioResourceReferences() { val json=RpgJson.instance.parseToJsonElement(RainyDock.json).jsonObject; assertEquals(RainyDock.actions.map { it.id }, json.getValue("actions").jsonArray.map { it.jsonPrimitive.content }); assertEquals(64,RainyDock.hash.length) }
     @Test fun schemaContract() { val schema=javaClass.getResourceAsStream("/plan.schema.json")!!.bufferedReader().use { it.readText() }; val alternatives=RpgJson.instance.parseToJsonElement(schema).jsonObject.getValue("oneOf").jsonArray; assertEquals(4,alternatives.size); alternatives.forEach { assertEquals(false,it.jsonObject.getValue("additionalProperties").jsonPrimitive.boolean) }; val actionIds=alternatives.first().jsonObject.getValue("properties").jsonObject.getValue("action_id").jsonObject.getValue("enum").jsonArray.map { it.jsonPrimitive.content }; assertEquals(RainyDock.actions.map { it.id },actionIds) }
+    @Test fun explicitFakeProducesAllFourPlanKinds() = runBlocking {
+        val store=InMemoryGameStore(); val c=TurnCoordinator(store,FakeModelGateway()); val id=c.createCampaign("t","林舟",model)
+        c.submit(id,"a",0,"等待"); c.submit(id,"b",1,"闲聊"); c.submit(id,"c",1,"救人"); c.submit(id,"d",1,"规则")
+        assertEquals(PlanKind.entries.toSet(),store.list().single().turns.map { it.plan!!.kind }.toSet())
+    }
     @Test fun recoveryDoesNotCallModelAndResumesOnlyNarration() = runBlocking {
         val gateway=ScriptGateway("{\"schema_version\":1,\"kind\":\"ooc\"}"); val store=InMemoryGameStore(); val c=TurnCoordinator(store,gateway); val id=c.createCampaign("t","林舟",model)
         store.transaction(id) { it.turns += Turn("lost",id,1,"m","规则",TurnStage.NARRATING,0,model,0,attemptId="old",plan=Plan(PlanKind.OOC),result=TurnResult(publicSummary="规则问答"),attempts=mutableListOf(RequestAttempt("old",TurnStage.NARRATING,1,model.fingerprint))) }

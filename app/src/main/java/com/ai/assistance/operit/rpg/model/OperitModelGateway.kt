@@ -9,6 +9,7 @@ import com.ai.assistance.operit.data.model.*
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.rpg.core.*
 import com.ai.assistance.operit.util.ChatUtils
+import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -18,13 +19,14 @@ class OperitModelGateway(private val context: Context, private val manager: Mode
     override suspend fun narrate(request: ModelRequest) = run(request)
     override suspend fun cancel(attemptId: String) { active.remove(attemptId)?.cancelStreaming() }
 
-    private suspend fun run(request: ModelRequest): ModelReply = withContext(Dispatchers.IO) {
+    private suspend fun run(request: ModelRequest): ModelReply = AppLogger.withPrivateLogging { withContext(Dispatchers.IO) {
         val original = manager.getModelConfig(request.configuration.configurationId)
             ?: error("模型配置已删除，请在本轮结束后重新选择")
         require(original.apiProviderTypeId == request.configuration.providerId &&
             getModelList(original.modelName).contains(request.configuration.modelId)) { "模型配置已改变" }
         require(configurationFingerprint(original, request.configuration.modelId) == request.configuration.fingerprint) { "模型连接设置已改变，请恢复原配置后继续本轮" }
         require(ApiProviderType.fromProviderTypeId(original.apiProviderTypeId) != null) { "首版暂不支持插件模型供应商" }
+        require(original.apiProviderType !in setOf(ApiProviderType.MNN, ApiProviderType.LLAMA_CPP)) { "首版跑团仅支持云端模型或明确的离线演示" }
         val config = original.copy(modelName = request.configuration.modelId, enableToolCall = false,
             enableGoogleSearch = false, enableDeepSeekWebSearch = false, enableCodexWebSearch = false,
             enableSummary = false, enableDirectImageProcessing = false, enableDirectAudioProcessing = false,
@@ -49,7 +51,7 @@ class OperitModelGateway(private val context: Context, private val manager: Mode
                 ModelReply(visible, Usage(service.inputTokenCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), service.outputTokenCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()))
             }
         } finally { active.remove(request.attemptId); service.cancelStreaming(); service.release() }
-    }
+    } }
 }
 
 fun configurationFingerprint(config: ModelConfigData, modelId: String): String = sha256(listOf(config.id, config.apiProviderTypeId, modelId, config.apiEndpoint, config.thinkingConfigurations, config.thinkingOptionId).joinToString("\n"))

@@ -124,12 +124,13 @@ class RpgBackupService(private val store: GameStore) {
         checkScenario(r.scenarioId, r.scenarioVersion, r.scenarioHash, r.rulesVersion)
         require(r.id.isNotBlank() && r.title.isNotBlank() && r.title.length <= 100 && r.state.playerName.isNotBlank() && r.state.playerName.length <= 40 && r.createdAt >= 0 && r.updatedAt >= r.createdAt) { "战役元数据非法" }
         RainyDock.validate(r.state)
-        require(r.turns.map { it.id }.distinct().size == r.turns.size && r.turns.map { it.clientMessageId }.distinct().size == r.turns.size && r.events.map { it.id }.distinct().size == r.events.size) { "重复记录 ID" }
+        val turnIds = r.turns.map { it.id }.toSet()
+        require(turnIds.size == r.turns.size && r.turns.map { it.clientMessageId }.distinct().size == r.turns.size && r.events.map { it.id }.distinct().size == r.events.size && r.events.all { it.id.isNotBlank() }) { "重复或空记录 ID" }
         require(r.turns.all { it.stage == TurnStage.COMPLETE || it.stage == TurnStage.CANCELLED }) { "请先完成或取消中断回合" }
         if (requireSanitized) require(r.model == UNBOUND && r.turns.all { it.model == UNBOUND && it.attemptId == null && it.attempts.isEmpty() }) { "存档不能包含模型配置或请求记录" }
         var state = RainyDock.initialState(r.state.playerName)
         val eventsByTurn = r.events.groupBy { it.turnId }
-        require(r.events.all { it.campaignId == r.id && it.turnId in r.turns.map { t -> t.id } && it.visibility == "PUBLIC" }) { "事件外键或可见性非法" }
+        require(r.events.all { it.campaignId == r.id && it.turnId in turnIds && it.visibility == "PUBLIC" }) { "事件外键或可见性非法" }
         var eventIndex = 0
         r.turns.forEachIndexed { index, turn ->
             require(turn.id.isNotBlank() && turn.campaignId == r.id && turn.ordinal == index + 1 && turn.clientMessageId.isNotBlank() && turn.inputText.isNotBlank() && turn.inputText.length <= 2000 && turn.baseRevision == state.revision && turn.createdAt >= r.createdAt) { "回合顺序、内容或外键非法" }

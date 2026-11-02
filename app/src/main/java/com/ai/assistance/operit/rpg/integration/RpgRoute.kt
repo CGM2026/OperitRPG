@@ -105,8 +105,11 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
         check(engine.switchModel(current().id, config)) { "请先完成当前回合" }
     }
     override fun previewImport(uri: Uri) = launchOperation {
-        val record = withContext(Dispatchers.IO) {
+        val record = try { withContext(Dispatchers.IO) {
             requireNotNull(app.contentResolver.openInputStream(uri)).use { backups.preview(it) }
+        } } catch (e: IllegalArgumentException) {
+            message(e.message ?: "存档格式不符合要求。")
+            return@launchOperation
         }
         imported = record
         mutable.update { it.copy(importPreview = RpgImportPreview(record.title, record.state.playerName, "将创建独立战役，保留 ${record.turns.size} 条记录；导入后重新选择模型。")) }
@@ -159,6 +162,7 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
             manager.getAllConfigSummaries().forEach { summary ->
                 val config = manager.getModelConfig(summary.id) ?: return@forEach
                 if (ApiProviderType.fromProviderTypeId(config.apiProviderTypeId) == null) return@forEach
+                if (config.apiProviderType in setOf(ApiProviderType.MNN, ApiProviderType.LLAMA_CPP)) return@forEach
                 getModelList(config.modelName).forEachIndexed { index, model ->
                     val key = "${config.id}:$index"
                     map[key] = ModelConfiguration(config.id, config.apiProviderTypeId, model, configurationFingerprint(config, model))
