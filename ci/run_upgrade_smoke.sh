@@ -2,6 +2,14 @@
 set -euo pipefail
 
 mkdir -p upgrade-evidence
+collect_evidence() {
+  adb pull /sdcard/Android/data/io.github.cgm2026.operitrpg/files/upgrade-review upgrade-evidence/upgrade-review || true
+  adb exec-out screencap -p > upgrade-evidence/d20-upgraded.png || true
+  adb logcat -d -b crash > upgrade-evidence/crash-log.txt || true
+  adb shell uiautomator dump /sdcard/upgrade-window.xml || true
+  adb pull /sdcard/upgrade-window.xml upgrade-evidence/window.xml || true
+}
+trap collect_evidence EXIT
 adb install upgrade-fixture/build/outputs/apk/release/upgrade-fixture-release.apk
 adb shell am start -W -n io.github.cgm2026.operitrpg/com.ai.assistance.operit.upgradefixture.FixtureActivity
 ready=false
@@ -21,6 +29,3 @@ adb install -r app/build/outputs/apk/androidTest/release/app-release-androidTest
 adb shell am instrument -w -r -e class com.ai.assistance.operit.rpg.upgrade.UpgradeCompatibilityTest \
   io.github.cgm2026.operitrpg.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-evidence/instrumentation.txt
 grep -Eq '^OK \([1-9][0-9]* tests?\)' upgrade-evidence/instrumentation.txt
-adb pull /sdcard/Android/data/io.github.cgm2026.operitrpg/files/upgrade-review upgrade-evidence/upgrade-review
-adb exec-out screencap -p > upgrade-evidence/d20-upgraded.png
-adb logcat -d -b crash > upgrade-evidence/crash-log.txt

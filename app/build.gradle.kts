@@ -107,6 +107,8 @@ dependencies {
     androidTestImplementation(libs.test.runner)
     androidTestImplementation(libs.test.core)
     androidTestImplementation(libs.test.uiautomator)
+    // AndroidX test tracing references this annotation; release test shrinking resolves it.
+    androidTestImplementation("com.google.errorprone:error_prone_annotations:2.27.0")
     androidTestImplementation(libs.test.espresso)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
