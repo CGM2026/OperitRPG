@@ -122,12 +122,13 @@ class UpgradeCompatibilityTest {
             assertEquals(expected.getString("modelFingerprint"), legacyFingerprint)
             screenshot("04-legacy-model-visible-key-masked")
             File(folder, "observed-after.json").writeText(JSONObject(readRecords()).toString())
-            File(folder, "upgrade-result.json").writeText(JSONObject().put("passed", true).put("versionCode", 2)
+            File(folder, "upgrade-result.json").writeText(JSONObject().put("passed", true).put("versionCode", 3)
                 .put("selectedCampaignBeforeLaunch", interruptedId).put("oldPreferenceBytesUnchanged", true)
                 .put("pendingRoll", 30).put("pendingEventsBeforeAndAfter", 4).put("continuedTick", 5)
                 .put("gameplayProvider", "DEMO").put("fixtureIsHistoricalApk", false).toString())
         } catch (failure: Throwable) {
             runCatching { screenshot("99-failure") }
+            runCatching { device.dumpWindowHierarchy(File(folder, "failure-window.xml")) }
             runCatching { File(folder, "observed-failure.json").writeText(JSONObject(readRecords()).toString()) }
             throw failure
         }
@@ -165,7 +166,9 @@ class UpgradeCompatibilityTest {
     private fun waitText(text: String) { assertTrue("Visible text missing: $text", device.wait(Until.hasObject(By.text(text)), 15_000) == true) }
     private fun scrollToText(text: String, preferLastScrollable: Boolean = false) {
         repeat(10) {
-            if (device.hasObject(By.text(text))) return
+            // Text and scrolling semantics can settle after a card's title appears.
+            // Wait for the requested exact label before declaring a non-scrollable screen failed.
+            if (device.wait(Until.hasObject(By.text(text)), 2_000) == true) return
             // LazyColumn exposes only visible items. Scroll the actual pane rather than assuming
             // the fourth saved turn or a settings control is already in the accessibility tree.
             val panes = device.findObjects(By.scrollable(true)).filter { it.visibleBounds.height() > 0 }

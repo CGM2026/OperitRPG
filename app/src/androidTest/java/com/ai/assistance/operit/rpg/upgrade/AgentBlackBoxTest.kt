@@ -134,6 +134,7 @@ class AgentBlackBoxTest {
                 .put("freshProcessVerified", false).toString())
         } catch (failure: Throwable) {
             runCatching { screenshot("agent-99-failure") }
+            runCatching { device.dumpWindowHierarchy(File(folder, "agent-failure-window.xml")) }
             File(folder, "agent-ui-result.json").writeText(JSONObject().put("passed", false).put("error", failure.toString()).toString())
             throw failure
         }
@@ -195,7 +196,7 @@ class AgentBlackBoxTest {
     private fun click(text: String) { requireNotNull(device.wait(Until.findObject(By.text(text).enabled(true)), 15_000)) { "Missing action: $text" }.click(); device.waitForIdle() }
     private fun scrollTo(text: String) {
         repeat(12) {
-            if (device.hasObject(By.text(text))) return
+            if (device.wait(Until.hasObject(By.text(text)), 2_000) == true) return
             val pane = device.findObjects(By.scrollable(true)).maxByOrNull { it.visibleBounds.height() * it.visibleBounds.width() }
             requireNotNull(pane) { "No scroll pane while finding $text" }.scroll(Direction.DOWN, 0.72f)
             device.waitForIdle()
