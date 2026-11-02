@@ -44,7 +44,7 @@ class UpgradeCompatibilityTest {
             val info = context.packageManager.getPackageInfo(context.packageName, 0)
             @Suppress("DEPRECATION")
             val versionCode = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
-            assertEquals(2L, versionCode)
+            assertEquals(3L, versionCode)
             assertEquals("二十面骰", context.applicationInfo.loadLabel(context.packageManager).toString())
             assertEquals("This must test the optimized release APK", 0, context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE)
             @Suppress("DEPRECATION")

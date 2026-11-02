@@ -3,6 +3,7 @@ package com.ai.assistance.operit.rpg.integration
 import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -16,9 +17,13 @@ import kotlinx.coroutines.flow.*
 import java.util.UUID
 
 @Composable
-fun RpgRoute() {
+fun RpgRoute(onBackToHome: (() -> Unit)? = null, requestedCampaignId: String? = null, openList: Boolean = false) {
     val controller: RpgViewModel = viewModel()
-    RpgScreen(controller)
+    LaunchedEffect(requestedCampaignId, openList) {
+        if (requestedCampaignId != null) controller.openCampaign(requestedCampaignId)
+        else if (openList) controller.closeCampaign()
+    }
+    RpgScreen(controller, onBackToHome)
 }
 
 class RpgViewModel(application: Application) : AndroidViewModel(application), RpgUiController {
@@ -40,7 +45,7 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
         viewModelScope.launch {
             try {
                 // Only orphaned requests from a previous process are recovered here; no cloud request starts.
-                withContext(Dispatchers.IO) { store.list().forEach { engine.recover(it.id) } }
+                withContext(Dispatchers.IO) { selectedId?.let { engine.recover(it) } }
                 load()
                 store.changes.collect { load() }
             } catch (e: Exception) { if (e is CancellationException) throw e; message("无法读取存档，请保留原数据并重试。") }
@@ -51,7 +56,7 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
     override fun refresh() { viewModelScope.launch { safely { loadModels(); load() } } }
     override fun openCampaign(id: String) {
         selectedId = id; preferences.edit().putString("campaign", id).apply()
-        viewModelScope.launch { safely { load() } }
+        viewModelScope.launch { safely { withContext(Dispatchers.IO) { engine.recover(id) }; load() } }
     }
     override fun closeCampaign() { selectedId = null; preferences.edit().remove("campaign").apply(); mutable.update { it.copy(campaign = null) } }
     override fun createCampaign(title: String, playerName: String, modelId: String) = launchOperation {
@@ -179,11 +184,11 @@ class RpgViewModel(application: Application) : AndroidViewModel(application), Rp
         mutable.update { it.copy(models = options) }
     }
     private suspend fun load() {
-        val records = withContext(Dispatchers.IO) { store.list() }
+        val records = withContext(Dispatchers.IO) { RpgDatabase.get(app).campaigns().headers(100) }
         val id = selectedId
-        val play = records.firstOrNull { it.id == id }?.let { adapt(RainyDock.publicView(it)) }
+        val play = if (id != null) withContext(Dispatchers.IO) { adapt(engine.publicView(id)) } else null
         mutable.update { it.copy(campaigns = records.map { r ->
-            RpgCampaignSummary(r.id, r.title, "${r.state.playerName} · 时间 ${r.state.tick}/12", r.state.status != CampaignStatus.ACTIVE)
+            RpgCampaignSummary(r.id, r.title, "原版规则 · 已保存进度", false)
         }, campaign = if (selectedId == id) play else it.campaign) }
     }
     private fun adapt(v: PublicCampaignView): RpgPlayState {

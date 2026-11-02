@@ -31,13 +31,21 @@ class OperitModelGateway(
     override suspend fun plan(request: ModelRequest) = run(request)
     override suspend fun narrate(request: ModelRequest) = run(request)
     override suspend fun cancel(attemptId: String) { active[attemptId]?.cancel() }
-    private suspend fun run(request: ModelRequest): ModelReply = withContext(Dispatchers.IO) {
+    fun cancelNow(attemptId: String) { active[attemptId]?.cancel() }
+    /** Long-form context is assembled by its own engine and must never be reshaped as legacy history. */
+    suspend fun generateText(request: ModelRequest): ModelReply = run(request, legacyBudget = false)
+    private suspend fun run(request: ModelRequest, legacyBudget: Boolean = true): ModelReply = withContext(Dispatchers.IO) {
         val config = configuration(request.configuration.configurationId) ?: throw ModelRequestException("模型配置已删除，请恢复原配置或明确重新绑定中断叙述")
         val protocol = config.protocol ?: throw ModelRequestException(config.unsupportedReason ?: "此配置需要重新配置")
         require(config.providerId == request.configuration.providerId && request.configuration.modelId in config.modelNames &&
             configurationFingerprint(config, request.configuration.modelId) == request.configuration.fingerprint) { "模型配置已改变，请恢复原配置或明确重新绑定中断叙述" }
         require(config.apiKey.length <= 16_384 && config.apiKey.all { it.code in 0x20..0x7e }) { "API Key包含无效字符，请重新填写" }
-        val prompt = ModelProtocolCodec.budget(request.systemPrompt, request.userPrompt)
+        val prompt = if (legacyBudget) ModelProtocolCodec.budget(request.systemPrompt, request.userPrompt) else {
+            require(request.maxOutputTokens in 1..8192 && request.systemPrompt.length + request.userPrompt.length <= 64_000) { "模型输入超过预算" }
+            val estimate = (request.systemPrompt + request.userPrompt).sumOf { if (it.code in 0x4E00..0x9FFF) 1.5 else 0.5 }
+            require(estimate <= 12_000) { "必要上下文超过输入预算，请缩小任务范围" }
+            request.userPrompt
+        }
         val body = ModelProtocolCodec.request(protocol, request.configuration.modelId, request.systemPrompt, prompt, request.maxOutputTokens)
         val builder = Request.Builder().url(modelEndpoint(config, request.configuration.modelId))
             .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))

@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version (must increase)'
         required: true
-        default: '0.2.0'
+        default: '0.3.0'
       version_code:
         description: 'Android versionCode (strictly increasing)'
         required: true
-        default: '2'
+        default: '3'
       publish:
         description: 'Publish after build (use false for a candidate requiring upgrade smoke first)'
         required: true
@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :rpg-core:test :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease \
+          ./gradlew :rpg-core:test :rpg-agent:test :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease \
             -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
             --max-workers=2 --no-parallel --stacktrace --no-daemon
 
@@ -208,6 +208,7 @@ jobs:
           Path('release/source.json').write_text(json.dumps({'runId':int(os.environ['GITHUB_RUN_ID']), 'headSha':os.environ['GITHUB_SHA']}, indent=2)+'\n')
           PY
           cp docs/TODO/rpg-release/RELEASE_NOTES.md release/RELEASE_NOTES.md
+          cp examples/rpg-agent-v03/*.rpgmodule.zip release/
 
       - name: Upload exact signed release candidate
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -227,7 +228,7 @@ jobs:
           set -euo pipefail
           gh release create "$RPG_TAG" release/*.apk release/update-manifest.json release/SHA256SUMS release/signature.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "二十面骰 $RPG_VERSION" \
-            --notes-file docs/TODO/rpg-release/RELEASE_NOTES.md --latest
+            --notes-file docs/TODO/rpg-release/RELEASE_NOTES.md --prerelease --latest=false
 
       - name: Save Gradle caches including failed builds
         if: always() && steps.cache-gradle.outputs.cache-primary-key != ''
@@ -248,6 +249,8 @@ jobs:
             app/build/test-results/**
             rpg-core/build/reports/**
             rpg-core/build/test-results/**
+            rpg-agent/build/reports/**
+            rpg-agent/build/test-results/**
             app/schemas/**
             app/build/outputs/mapping/release/**
             release/*.json

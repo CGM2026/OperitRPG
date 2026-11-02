@@ -22,8 +22,8 @@ android {
         applicationId = "io.github.cgm2026.operitrpg"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.gradleProperty("rpgVersionCode").orElse("2").get().toInt()
-        versionName = providers.gradleProperty("rpgVersionName").orElse("0.2.0").get()
+        versionCode = providers.gradleProperty("rpgVersionCode").orElse("3").get().toInt()
+        versionName = providers.gradleProperty("rpgVersionName").orElse("0.3.0").get()
         resValue("string", "rpg_app_name", "二十面骰")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -60,6 +60,7 @@ tasks.matching { it.name == "packageRelease" || it.name == "bundleRelease" }.con
 }
 dependencies {
     implementation(project(":rpg-core"))
+    implementation(project(":rpg-agent"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.runtime.ktx)

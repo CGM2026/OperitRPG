@@ -46,7 +46,7 @@ fun DiceModelSettingsScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RpgScreen(controller: RpgUiController) {
+fun RpgScreen(controller: RpgUiController, onBackToHome: (() -> Unit)? = null) {
     val state by controller.state.collectAsState()
     var page by rememberSaveable { mutableStateOf("list") }
     var modelReturnPage by rememberSaveable { mutableStateOf("list") }
@@ -70,7 +70,7 @@ fun RpgScreen(controller: RpgUiController) {
     // Loading a route only reads local state. Retrying a model stage always requires a tap.
     LaunchedEffect(controller) { controller.refresh() }
     LaunchedEffect(campaign?.id) { if (campaign != null) page = "play" }
-    BackHandler(enabled = panel != null || page != "list") {
+    BackHandler(enabled = panel != null || page != "list" || onBackToHome != null) {
         when {
             clueId != null -> clueId = null
             panel != null -> panel = null
@@ -78,6 +78,7 @@ fun RpgScreen(controller: RpgUiController) {
             page == "appSettings" -> page = "list"
             page == "settings" -> page = "play"
             page == "rules" -> page = if (campaign != null) "settings" else "list"
+            page == "list" && onBackToHome != null -> onBackToHome()
             else -> { page = "list"; controller.closeCampaign() }
         }
     }
@@ -91,6 +92,7 @@ fun RpgScreen(controller: RpgUiController) {
                     }
                     if (page == "play") TextButton(onClick = { keyboard?.hide(); page = "settings" }) { Text("设置") }
                     if (page == "list") TextButton(onClick = { page = "appSettings" }) { Text("设置") }
+                    if (page == "list" && onBackToHome != null) TextButton(onClick = onBackToHome) { Text("全部战役") }
                     if (page != "list") TextButton(onClick = {
                         if (page == "settings") page = "play" else if (page == "appSettings") page = "list" else { page = "list"; controller.closeCampaign() }
                     }) { Text("返回") }

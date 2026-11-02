@@ -10,8 +10,12 @@ import kotlinx.serialization.encodeToString
 @Entity(tableName = "rpg_campaign")
 data class RpgCampaignEntity(@PrimaryKey val id: String, val title: String, val updatedAt: Long, val revision: Long, val recordJson: String)
 
+data class RpgCampaignHeader(val id: String, val title: String, val updatedAt: Long, val revision: Long)
+
 @Dao
 interface RpgCampaignDao {
+    @Query("SELECT id,title,updatedAt,revision FROM rpg_campaign ORDER BY updatedAt DESC,id LIMIT :limit OFFSET :offset")
+    suspend fun headers(limit: Int = 50, offset: Int = 0): List<RpgCampaignHeader>
     @Query("SELECT * FROM rpg_campaign ORDER BY updatedAt DESC")
     suspend fun all(): List<RpgCampaignEntity>
     @Query("SELECT * FROM rpg_campaign WHERE id = :id")

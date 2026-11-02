@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import com.ai.assistance.operit.rpg.integration.RpgRoute
+import com.ai.assistance.operit.rpg.integration.D20Route
 
 /** Keep the published launcher component so installed shortcuts retain their identity. */
 class MainActivity : ComponentActivity() {
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
         )
         setContent {
-            Box(Modifier.fillMaxSize().background(Color(0xFFF5F4F0)).safeDrawingPadding()) { RpgRoute() }
+            Box(Modifier.fillMaxSize().background(Color(0xFFF5F4F0)).safeDrawingPadding()) { D20Route() }
         }
     }
 }

@@ -1,0 +1,882 @@
+[
+  {
+    "id": "q1",
+    "language": "zh",
+    "question": "从这里移动到隔壁允许吗",
+    "expectedRuleIds": [
+      "gold:travel"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q2",
+    "language": "zh",
+    "question": "请说明移动的规则",
+    "expectedRuleIds": [
+      "gold:travel"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q3",
+    "language": "zh",
+    "question": "移动有什么限制",
+    "expectedRuleIds": [
+      "gold:travel"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q4",
+    "language": "zh",
+    "question": "移动如何处理",
+    "expectedRuleIds": [
+      "gold:travel"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q5",
+    "language": "zh",
+    "question": "休息一小时能恢复多少",
+    "expectedRuleIds": [
+      "gold:rest"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q6",
+    "language": "zh",
+    "question": "请说明休息的规则",
+    "expectedRuleIds": [
+      "gold:rest"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q7",
+    "language": "zh",
+    "question": "休息有什么限制",
+    "expectedRuleIds": [
+      "gold:rest"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q8",
+    "language": "zh",
+    "question": "休息如何处理",
+    "expectedRuleIds": [
+      "gold:rest"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q9",
+    "language": "zh",
+    "question": "交涉该用什么技能",
+    "expectedRuleIds": [
+      "gold:negotiate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q10",
+    "language": "zh",
+    "question": "请说明交涉的规则",
+    "expectedRuleIds": [
+      "gold:negotiate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q11",
+    "language": "zh",
+    "question": "交涉有什么限制",
+    "expectedRuleIds": [
+      "gold:negotiate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q12",
+    "language": "zh",
+    "question": "交涉如何处理",
+    "expectedRuleIds": [
+      "gold:negotiate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q13",
+    "language": "zh",
+    "question": "调查成功会得到线索吗",
+    "expectedRuleIds": [
+      "gold:investigate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q14",
+    "language": "zh",
+    "question": "请说明调查的规则",
+    "expectedRuleIds": [
+      "gold:investigate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q15",
+    "language": "zh",
+    "question": "调查有什么限制",
+    "expectedRuleIds": [
+      "gold:investigate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q16",
+    "language": "zh",
+    "question": "调查如何处理",
+    "expectedRuleIds": [
+      "gold:investigate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q17",
+    "language": "zh",
+    "question": "负重最多多少件",
+    "expectedRuleIds": [
+      "gold:burden"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q18",
+    "language": "zh",
+    "question": "请说明负重的规则",
+    "expectedRuleIds": [
+      "gold:burden"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q19",
+    "language": "zh",
+    "question": "负重有什么限制",
+    "expectedRuleIds": [
+      "gold:burden"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q20",
+    "language": "zh",
+    "question": "负重如何处理",
+    "expectedRuleIds": [
+      "gold:burden"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q21",
+    "language": "zh",
+    "question": "照明要消耗燃料吗",
+    "expectedRuleIds": [
+      "gold:light"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q22",
+    "language": "zh",
+    "question": "请说明照明的规则",
+    "expectedRuleIds": [
+      "gold:light"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q23",
+    "language": "zh",
+    "question": "照明有什么限制",
+    "expectedRuleIds": [
+      "gold:light"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q24",
+    "language": "zh",
+    "question": "照明如何处理",
+    "expectedRuleIds": [
+      "gold:light"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q25",
+    "language": "zh",
+    "question": "急救要用绷带吗",
+    "expectedRuleIds": [
+      "gold:firstaid"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q26",
+    "language": "zh",
+    "question": "请说明急救的规则",
+    "expectedRuleIds": [
+      "gold:firstaid"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q27",
+    "language": "zh",
+    "question": "急救有什么限制",
+    "expectedRuleIds": [
+      "gold:firstaid"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q28",
+    "language": "zh",
+    "question": "急救如何处理",
+    "expectedRuleIds": [
+      "gold:firstaid"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q29",
+    "language": "zh",
+    "question": "开锁失败会耗时间吗",
+    "expectedRuleIds": [
+      "gold:lock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q30",
+    "language": "zh",
+    "question": "请说明开锁的规则",
+    "expectedRuleIds": [
+      "gold:lock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q31",
+    "language": "zh",
+    "question": "开锁有什么限制",
+    "expectedRuleIds": [
+      "gold:lock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q32",
+    "language": "zh",
+    "question": "开锁如何处理",
+    "expectedRuleIds": [
+      "gold:lock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q33",
+    "language": "zh",
+    "question": "攀爬失败扣几点生命",
+    "expectedRuleIds": [
+      "gold:climb"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q34",
+    "language": "zh",
+    "question": "请说明攀爬的规则",
+    "expectedRuleIds": [
+      "gold:climb"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q35",
+    "language": "zh",
+    "question": "攀爬有什么限制",
+    "expectedRuleIds": [
+      "gold:climb"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q36",
+    "language": "zh",
+    "question": "攀爬如何处理",
+    "expectedRuleIds": [
+      "gold:climb"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q37",
+    "language": "zh",
+    "question": "潜行在明亮地方更难吗",
+    "expectedRuleIds": [
+      "gold:stealth"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q38",
+    "language": "zh",
+    "question": "请说明潜行的规则",
+    "expectedRuleIds": [
+      "gold:stealth"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q39",
+    "language": "zh",
+    "question": "潜行有什么限制",
+    "expectedRuleIds": [
+      "gold:stealth"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q40",
+    "language": "zh",
+    "question": "潜行如何处理",
+    "expectedRuleIds": [
+      "gold:stealth"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q41",
+    "language": "zh",
+    "question": "交易是否要求双方在场",
+    "expectedRuleIds": [
+      "gold:trade"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q42",
+    "language": "zh",
+    "question": "请说明交易的规则",
+    "expectedRuleIds": [
+      "gold:trade"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q43",
+    "language": "zh",
+    "question": "交易有什么限制",
+    "expectedRuleIds": [
+      "gold:trade"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q44",
+    "language": "zh",
+    "question": "交易如何处理",
+    "expectedRuleIds": [
+      "gold:trade"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q45",
+    "language": "zh",
+    "question": "承诺是否保证成功",
+    "expectedRuleIds": [
+      "gold:promise"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q46",
+    "language": "zh",
+    "question": "请说明承诺的规则",
+    "expectedRuleIds": [
+      "gold:promise"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q47",
+    "language": "zh",
+    "question": "承诺有什么限制",
+    "expectedRuleIds": [
+      "gold:promise"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q48",
+    "language": "zh",
+    "question": "承诺如何处理",
+    "expectedRuleIds": [
+      "gold:promise"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q49",
+    "language": "zh",
+    "question": "知情可以自动共享吗",
+    "expectedRuleIds": [
+      "gold:knowledge"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q50",
+    "language": "zh",
+    "question": "请说明知情的规则",
+    "expectedRuleIds": [
+      "gold:knowledge"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q51",
+    "language": "zh",
+    "question": "知情有什么限制",
+    "expectedRuleIds": [
+      "gold:knowledge"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q52",
+    "language": "zh",
+    "question": "知情如何处理",
+    "expectedRuleIds": [
+      "gold:knowledge"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q53",
+    "language": "zh",
+    "question": "时钟会跟现实时间走吗",
+    "expectedRuleIds": [
+      "gold:clock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q54",
+    "language": "zh",
+    "question": "请说明时钟的规则",
+    "expectedRuleIds": [
+      "gold:clock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q55",
+    "language": "zh",
+    "question": "时钟有什么限制",
+    "expectedRuleIds": [
+      "gold:clock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q56",
+    "language": "zh",
+    "question": "时钟如何处理",
+    "expectedRuleIds": [
+      "gold:clock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q57",
+    "language": "zh",
+    "question": "口粮每天消耗几份",
+    "expectedRuleIds": [
+      "gold:ration"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q58",
+    "language": "zh",
+    "question": "请说明口粮的规则",
+    "expectedRuleIds": [
+      "gold:ration"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q59",
+    "language": "zh",
+    "question": "口粮有什么限制",
+    "expectedRuleIds": [
+      "gold:ration"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q60",
+    "language": "zh",
+    "question": "口粮如何处理",
+    "expectedRuleIds": [
+      "gold:ration"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q61",
+    "language": "zh",
+    "question": "天气暴雨渡河难度多少",
+    "expectedRuleIds": [
+      "gold:weather"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q62",
+    "language": "zh",
+    "question": "请说明天气的规则",
+    "expectedRuleIds": [
+      "gold:weather"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q63",
+    "language": "zh",
+    "question": "天气有什么限制",
+    "expectedRuleIds": [
+      "gold:weather"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q64",
+    "language": "zh",
+    "question": "天气如何处理",
+    "expectedRuleIds": [
+      "gold:weather"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q65",
+    "language": "zh",
+    "question": "信任每次能变化多少",
+    "expectedRuleIds": [
+      "gold:trust"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q66",
+    "language": "zh",
+    "question": "请说明信任的规则",
+    "expectedRuleIds": [
+      "gold:trust"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q67",
+    "language": "zh",
+    "question": "信任有什么限制",
+    "expectedRuleIds": [
+      "gold:trust"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q68",
+    "language": "zh",
+    "question": "信任如何处理",
+    "expectedRuleIds": [
+      "gold:trust"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q69",
+    "language": "zh",
+    "question": "目标能由旁白改变吗",
+    "expectedRuleIds": [
+      "gold:goal"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q70",
+    "language": "zh",
+    "question": "请说明目标的规则",
+    "expectedRuleIds": [
+      "gold:goal"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q71",
+    "language": "zh",
+    "question": "目标有什么限制",
+    "expectedRuleIds": [
+      "gold:goal"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q72",
+    "language": "zh",
+    "question": "目标如何处理",
+    "expectedRuleIds": [
+      "gold:goal"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q73",
+    "language": "zh",
+    "question": "谣言算正式事实吗",
+    "expectedRuleIds": [
+      "gold:rumor"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q74",
+    "language": "zh",
+    "question": "请说明谣言的规则",
+    "expectedRuleIds": [
+      "gold:rumor"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q75",
+    "language": "zh",
+    "question": "谣言有什么限制",
+    "expectedRuleIds": [
+      "gold:rumor"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q76",
+    "language": "zh",
+    "question": "谣言如何处理",
+    "expectedRuleIds": [
+      "gold:rumor"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q77",
+    "language": "zh",
+    "question": "等待是否需要掷骰",
+    "expectedRuleIds": [
+      "gold:wait"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q78",
+    "language": "zh",
+    "question": "请说明等待的规则",
+    "expectedRuleIds": [
+      "gold:wait"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q79",
+    "language": "zh",
+    "question": "等待有什么限制",
+    "expectedRuleIds": [
+      "gold:wait"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q80",
+    "language": "zh",
+    "question": "等待如何处理",
+    "expectedRuleIds": [
+      "gold:wait"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q81",
+    "language": "en",
+    "question": "gold:travel",
+    "expectedRuleIds": [
+      "gold:travel"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q82",
+    "language": "en",
+    "question": "gold:rest",
+    "expectedRuleIds": [
+      "gold:rest"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q83",
+    "language": "en",
+    "question": "gold:negotiate",
+    "expectedRuleIds": [
+      "gold:negotiate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q84",
+    "language": "en",
+    "question": "gold:investigate",
+    "expectedRuleIds": [
+      "gold:investigate"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q85",
+    "language": "en",
+    "question": "gold:burden",
+    "expectedRuleIds": [
+      "gold:burden"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q86",
+    "language": "en",
+    "question": "gold:light",
+    "expectedRuleIds": [
+      "gold:light"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q87",
+    "language": "en",
+    "question": "gold:firstaid",
+    "expectedRuleIds": [
+      "gold:firstaid"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q88",
+    "language": "en",
+    "question": "gold:lock",
+    "expectedRuleIds": [
+      "gold:lock"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q89",
+    "language": "en",
+    "question": "gold:climb",
+    "expectedRuleIds": [
+      "gold:climb"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q90",
+    "language": "en",
+    "question": "gold:stealth",
+    "expectedRuleIds": [
+      "gold:stealth"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "q91",
+    "language": "en",
+    "question": "unsupported_xyz_0",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q92",
+    "language": "en",
+    "question": "unsupported_xyz_1",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q93",
+    "language": "en",
+    "question": "unsupported_xyz_2",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q94",
+    "language": "en",
+    "question": "unsupported_xyz_3",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q95",
+    "language": "en",
+    "question": "unsupported_xyz_4",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q96",
+    "language": "en",
+    "question": "unsupported_xyz_5",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q97",
+    "language": "en",
+    "question": "unsupported_xyz_6",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q98",
+    "language": "en",
+    "question": "unsupported_xyz_7",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q99",
+    "language": "en",
+    "question": "unsupported_xyz_8",
+    "expectedRuleIds": [],
+    "answerable": false
+  },
+  {
+    "id": "q100",
+    "language": "en",
+    "question": "unsupported_xyz_9",
+    "expectedRuleIds": [],
+    "answerable": false
+  }
+]

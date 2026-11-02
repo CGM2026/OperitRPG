@@ -1,0 +1,53 @@
+package com.ai.assistance.operit.rpg.agent.contract
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+
+const val AGENT_API_VERSION = 1
+const val LONGFORM_ENGINE = "longform-v1"
+@Serializable data class CampaignRef(val engineId: String, val campaignId: String)
+@Serializable data class VersionRef(val id: String, val version: String, val hash: String)
+@Serializable enum class Audience { PUBLIC, GM, NPC, FACTION }
+@Serializable data class Visibility(val audience: Audience, val subjectId: String? = null)
+@Serializable data class RoleContext(val campaignId: String, val audience: Audience, val subjectId: String? = null)
+@Serializable data class SourceRef(val sourceId: String, val sourceHash: String, val anchor: String, val authority: String)
+@Serializable data class RuleEvidence(val ruleId: String, val source: SourceRef, val quote: String, val visibility: Visibility)
+@Serializable data class FileDigest(val path: String, val size: Long, val sha256: String)
+@Serializable data class ModuleManifest(val formatVersion: Int, val moduleId: String, val version: String, val title: String, val author: String, val description: String, val engineApiVersion: Int, val rulesetId: String, val rulesetVersion: String, val files: List<FileDigest>)
+@Serializable data class Location(val id: String, val title: String, val description: String, val exits: List<String>)
+@Serializable data class NpcState(val id: String, val name: String, val locationId: String, val status: String, val personality: String, val goal: String, val relationships: Map<String, Int> = emptyMap(), val nextActionAt: Long? = null)
+@Serializable data class Fact(val id: String, val text: String, val visibility: Visibility, val locked: Boolean, val source: SourceRef)
+@Serializable data class Claim(val id: String, val actorId: String, val text: String, val sourceEventSeq: Long, val visibility: Visibility, val supersedesId: String? = null)
+@Serializable data class KnowledgeEdge(val knowerId: String, val factId: String, val learnedAtSeq: Long, val method: String, val belief: String)
+@Serializable data class Objective(val id: String, val title: String, val chapter: Int, val status: String)
+@Serializable data class Item(val id: String, val title: String, val ownerId: String, val quantity: Int)
+@Serializable data class CharacterTemplate(val id: String, val name: String, val skills: Map<String, Int>, val resources: Map<String, Int>)
+@Serializable data class GenerationPolicy(val allowedEntityTypes: Set<String>, val maxEntities: Int, val lockedFactIds: Set<String>)
+@Serializable data class Condition(val type: String, val targetId: String? = null, val key: String? = null, val value: String? = null, val children: List<Condition> = emptyList())
+@Serializable data class Effect(val type: String, val targetId: String, val key: String? = null, val amount: Int? = null, val value: String? = null, val source: SourceRef)
+@Serializable data class EntityCreation(val type: String, val id: String, val title: String, val locationId: String, val description: String, val source: SourceRef)
+@Serializable data class ActionDefinition(val id: String, val title: String, val actionType: String, val targetIds: List<String>, val skill: String?, val difficulty: String, val ruleId: String, val conditions: List<Condition>, val successEffects: List<Effect>, val failureEffects: List<Effect>)
+@Serializable data class ModuleWorld(val startLocationId: String, val characters: List<CharacterTemplate>, val locations: List<Location>, val npcs: List<NpcState>, val items: List<Item>, val facts: List<Fact>, val objectives: List<Objective>, val actions: List<ActionDefinition>, val policy: GenerationPolicy)
+@Serializable data class ResourceBounds(val min: Int, val max: Int)
+@Serializable data class ModuleRules(val adapterId: String, val adapterVersion: String, val skills: Set<String>, val resourceBounds: Map<String, ResourceBounds>, val difficulties: Map<String, Int>, val allowedEffects: Set<String>, val evidence: List<RuleEvidence>, val timeUnit: String)
+@Serializable data class ValidatedModule(val manifest: ModuleManifest, val contentHash: String, val world: ModuleWorld, val rules: ModuleRules, val sources: Map<String, String>, val originalFiles: Map<String, String> = emptyMap())
+@Serializable data class WorldState(val locationId: String, val resources: Map<String, Int>, val skills: Map<String, Int>, val npcs: List<NpcState>, val items: List<Item>, val facts: List<Fact>, val objectives: List<Objective>, val knowledge: List<KnowledgeEdge>, val generated: List<EntityCreation> = emptyList(), val gameTime: Long = 0)
+@Serializable data class Campaign(val id: String, val title: String, val module: VersionRef, val rules: VersionRef, val revision: Long, val lastEventSeq: Long, val world: WorldState, val allowGeneration: Boolean, val modelFingerprint: String, val updatedAt: Long, val nextTurnOrdinal: Long = 1)
+@Serializable enum class TurnPhase { RECEIVED, GATHERING, PROPOSED, AWAITING_CONFIRMATION, READY, COMMITTED, NARRATING, COMPLETE, CANCELLED }
+@Serializable data class ActionProposal(val actionType: String, val targetIds: List<String>, val skill: String?, val difficulty: String, val ruleRefs: List<String>, val conditions: List<Condition>, val successEffects: List<Effect>, val failureEffects: List<Effect>, val creations: List<EntityCreation> = emptyList(), val requiresConfirmation: Boolean = false, val publicSummary: String, val temporaryRuling: Boolean = false)
+@Serializable data class FrozenPlan(val baseRevision: Long, val moduleHash: String, val rulesHash: String, val modelFingerprint: String, val proposal: ActionProposal, val evidence: List<RuleEvidence>, val planHash: String)
+@Serializable data class DiceRoll(val sides: Int, val value: Int, val threshold: Int)
+@Serializable data class WorldEvent(val eventVersion: Int, val campaignId: String, val seq: Long, val turnId: String, val effects: List<Effect>, val creations: List<EntityCreation>, val dice: DiceRoll?, val visibility: Visibility, val sources: List<SourceRef>)
+@Serializable data class CommittedResult(val turnId: String, val eventSeq: Long, val success: Boolean, val dice: DiceRoll?, val publicSummary: String, val evidence: List<RuleEvidence>)
+@Serializable data class ToolCall(val invocationId: String, val name: String, val arguments: JsonObject)
+@Serializable data class ToolResult(val invocationId: String, val toolSchemaVersion: Int, val argumentHash: String, val revision: Long, val sourceRefs: List<SourceRef>, val output: String)
+@Serializable data class AgentStep(val version: Int, val kind: String, val calls: List<ToolCall>? = null, val proposal: ActionProposal? = null, val text: String? = null)
+@Serializable data class Usage(val inputTokens: Int, val outputTokens: Int)
+@Serializable data class ModelAttempt(val id: String, val purpose: String, val fingerprint: String, val status: String, val usage: Usage? = null)
+@Serializable data class Turn(val id: String, val campaignId: String, val ordinal: Long, val clientMessageId: String, val playerText: String, val baseRevision: Long, val phase: TurnPhase, val plan: FrozenPlan? = null, val result: CommittedResult? = null, val narration: String? = null, val attempts: List<ModelAttempt> = emptyList(), val tools: List<ToolResult> = emptyList(), val error: String? = null)
+@Serializable data class MemoryItem(val id: String, val campaignId: String, val text: String, val entityIds: List<String>, val fromSeq: Long, val toSeq: Long, val visibility: Visibility, val status: String, val supersedesId: String? = null)
+@Serializable data class CampaignHeader(val ref: CampaignRef, val title: String, val updatedAt: Long)
+@Serializable data class BackupManifestV2(val archiveFormatVersion: Int, val engineId: String, val engineVersion: Int, val eventSchemaVersion: Int, val module: VersionRef, val rules: VersionRef, val files: List<FileDigest>)
+@Serializable data class ContextPacket(val purpose: String, val system: String, val input: String, val maxOutputTokens: Int)
+@Serializable data class TextModelReply(val text: String, val usage: Usage)
+data class CampaignSession(val campaign: Campaign, val pendingTurn: Turn?)
