@@ -121,13 +121,13 @@ jobs:
           Path('local.properties').write_text(''.join(key+'='+prop(value)+'\n' for key,value in values.items()))
           PY
 
-      - name: Build legacy fixture, optimized app and release instrumentation
+      - name: Build legacy fixture and independent black-box test tool
         shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :upgrade-fixture:assembleRelease :app:assembleRelease :app:assembleReleaseAndroidTest \
-            -PrpgUpgradeFixture=true -PrpgUpgradeSmoke=true -PandroidTestBuildType=release -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
+          ./gradlew :upgrade-fixture:assembleRelease :upgrade-tests:assembleRelease \
+            -PrpgUpgradeFixture=true \
             --max-workers=2 --no-parallel --stacktrace --no-daemon
           mkdir -p upgrade-evidence
           for apk in upgrade-fixture/build/outputs/apk/release/upgrade-fixture-release.apk "$D20_UPGRADE_APK_PATH"; do
@@ -137,6 +137,9 @@ jobs:
           done
           test "$(apkanalyzer manifest version-code upgrade-fixture/build/outputs/apk/release/upgrade-fixture-release.apk)" = '1'
           test "$(apkanalyzer manifest version-code "$D20_UPGRADE_APK_PATH")" = "$RPG_CODE"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs upgrade-tests/build/outputs/apk/release/upgrade-tests-release.apk > upgrade-evidence/upgrade-tests.signature.txt
+          grep -q "Signer #1 certificate SHA-256 digest: $RPG_EXPECTED_SIGNER_SHA256" upgrade-evidence/upgrade-tests.signature.txt
+          test "$(apkanalyzer manifest application-id upgrade-tests/build/outputs/apk/release/upgrade-tests-release.apk)" = 'io.github.cgm2026.operitrpg.test'
 
       # KVM setup follows the emulator action's official Linux runner instructions.
       - name: Enable hardware acceleration

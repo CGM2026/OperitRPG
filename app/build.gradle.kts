@@ -41,11 +41,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            testProguardFiles("proguard-test-rules.pro")
             if (releaseSigningAvailable) signingConfig = signingConfigs.getByName("release")
         }
     }
-    testBuildType = providers.gradleProperty("androidTestBuildType").orElse("debug").get()
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -55,26 +53,6 @@ android {
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
-// The optimized-release smoke has no references to target APIs that R8 may rename.
-// Default debug instrumentation and all JVM test sources remain complete.
-if (providers.gradleProperty("rpgUpgradeSmoke").orNull == "true") {
-    require(android.testBuildType == "release") { "Upgrade smoke must target the optimized release" }
-    val upgradeTests = fileTree("src/androidTest/java") {
-        include("com/ai/assistance/operit/rpg/upgrade/**/*.kt")
-    }
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        if (name == "compileReleaseAndroidTestKotlin" || name == "kaptGenerateStubsReleaseAndroidTestKotlin") {
-            setSource(upgradeTests)
-            setIncludes(listOf("**/rpg/upgrade/**/*.kt"))
-            doFirst {
-                require(sources.files.isNotEmpty() && sources.files.all { it in upgradeTests.files }) {
-                    "Release upgrade instrumentation must contain only black-box upgrade tests"
-                }
-            }
-        }
-    }
-}
-
 tasks.matching { it.name == "packageRelease" || it.name == "bundleRelease" }.configureEach {
     doFirst { require(releaseSigningAvailable) {
         "Release requires the existing permanent RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS and RELEASE_KEY_PASSWORD"

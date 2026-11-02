@@ -14,10 +14,8 @@ on:
       publish:
         description: 'Publish after build (use false for a candidate requiring upgrade smoke first)'
         required: true
-        default: true
+        default: false
         type: boolean
-  push:
-    tags: ['rpg-v*']
 
 concurrency:
   group: rpg-release
@@ -221,7 +219,7 @@ jobs:
           retention-days: 14
 
       - name: Publish release
-        if: github.event_name != 'workflow_dispatch' || inputs.publish
+        if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

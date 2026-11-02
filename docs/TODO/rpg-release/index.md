@@ -31,4 +31,6 @@ CI 使用 JDK 21、SDK platform 36 和 build-tools 35.0.0，依次运行 core/ap
 
 x86_64 升级验收使用独立的旧 schema 小 fixture APK：同 applicationId、同永久签名、versionCode 1，种入旧版数据库与模型偏好，等待 READY_V1 标记后强停，再以保留数据的方式覆盖安装候选 release。历史 0.1.0 APK 仅含 arm64，因此模拟器使用合成旧 schema fixture；fixture 是测试工具，不属于默认工程或发布产物。
 
-仅升级工作流启用 rpgUpgradeFixture、rpgUpgradeSmoke 与 androidTestBuildType=release。其 release 仪表测试仅编译 rpg/upgrade 下的黑盒测试，通过 UI、SQLite 和 JSON 核对结果；正式 APK 仍经过 R8。默认 debug 的 Room/Compose 仪表测试和全部 JVM 测试保持完整。
+仅升级工作流启用 rpgUpgradeFixture，额外包含 upgrade-fixture 和 upgrade-tests 两个测试工具模块。upgrade-tests 是独立、同永久签名、不压缩的 Android application，applicationId 为 io.github.cgm2026.operitrpg.test，手写 instrumentation 指向主应用；它只编译 rpg/upgrade 下的黑盒源码，自带 AndroidJUnitRunner、JUnit、UiAutomator、test core 和 tracing，完全不依赖 app 或 rpg-core。工具包以 adb install -t 安装，实际受测产品始终为下载的 R8 候选 APK。这样测试运行库不会因与压缩目标去重而缺失，也无需保留生产类来满足测试。
+
+默认 debug 的 Room/Compose 仪表测试和全部 JVM 测试保持完整；不再构建 release AndroidTest，不再使用 rpgUpgradeSmoke、androidTestBuildType 或测试 ProGuard 规则。

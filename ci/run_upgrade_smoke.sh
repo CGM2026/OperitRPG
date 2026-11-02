@@ -25,7 +25,7 @@ adb shell am force-stop io.github.cgm2026.operitrpg
 
 # Keep package data and require Android to accept the same-signer version increase.
 adb install -r "$D20_UPGRADE_APK_PATH"
-adb install -r app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+adb install -r -t upgrade-tests/build/outputs/apk/release/upgrade-tests-release.apk
 adb shell am instrument -w -r -e class com.ai.assistance.operit.rpg.upgrade.UpgradeCompatibilityTest \
   io.github.cgm2026.operitrpg.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-evidence/instrumentation.txt
 grep -Eq '^OK \([1-9][0-9]* tests?\)' upgrade-evidence/instrumentation.txt
