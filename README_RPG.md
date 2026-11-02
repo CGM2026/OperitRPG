@@ -2,7 +2,7 @@
 
 基于 [Operit](https://github.com/AAswordman/Operit) 的 Android 单人文字跑团原型。使用原创短模组《雨夜旧码头》、本地 d100 规则、独立战役存档和可选云端 AI 主持。
 
-首版处于原型开发与验收阶段。支持 Android 8.0 以上 ARM64 手机。它保留 Operit 的通用能力，但首次启动直接进入跑团页，无需启用 Root、Shizuku、通知或自动化权限来跑团。
+首版 0.1.0 已发布，进入手机体验与验收阶段。支持 Android 8.0 以上 ARM64 手机。它保留 Operit 的通用能力，但首次启动直接进入跑团页，无需启用 Root、Shizuku、通知或自动化权限来跑团。
 
 ## 安装与更新
 
@@ -29,6 +29,7 @@ AI 只识别行动与生成叙述，程序执行检定和状态变化。已提�
 
 - [实现与验收进度](docs/TODO/rpg_prototype_v01/index.md)
 - [手机验收步骤与反馈模板](docs/TODO/rpg_prototype_v01/ACCEPTANCE.md)
+- [首版发布结果与实际验证范围](docs/TODO/rpg_prototype_v01/RELEASE_ACCEPTANCE.md)
 - [纯 Kotlin 核心与独立测试](rpg-core/README.md)
 - [发布配置](docs/TODO/rpg-release/index.md)
 - [上游构建指南](docs/doc-src/dev-core/BUILDING.md)
