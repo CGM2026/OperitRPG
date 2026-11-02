@@ -47,9 +47,8 @@ class AgentBlackBoxTest {
             click("新建战役")
             fillFirstField(title)
             scrollTo("雪线驿站失踪案 · 1.0.0")
-            click("雪线驿站失踪案 · 1.0.0")
-            val character = device.findObject(By.desc("选择角色 · 巡行者"))
-            if (character == null) scrollToContains("巡行者")
+            clickDescription("选择模组 · 雪线驿站失踪案")
+            assertTrue("Selecting the module must expose its character", device.wait(Until.hasObject(By.desc("选择角色 · 巡行者")), 15_000) == true)
             requireNotNull(device.wait(Until.findObject(By.desc("选择角色 · 巡行者")), 15_000)).click()
             device.waitForIdle()
             scrollTo("离线流程演示 · 固定脚本，不调用云端模型")
@@ -80,7 +79,7 @@ class AgentBlackBoxTest {
             waitText("掌柜沈禾")
             assertFalse("Private NPC goals must not enter the player sheet", device.hasObject(By.textContains("让本地人安全过冬")))
             screenshot("agent-05-public-people")
-            device.pressBack(); device.waitForIdle()
+            closePanel("人物")
 
             click("规则")
             fillFirstField("行动检定")
@@ -90,8 +89,9 @@ class AgentBlackBoxTest {
             waitContains("掷出1至100")
             waitText("rules.md · 行动检定")
             screenshot("agent-06-rule-source")
-            device.pressBack(); device.waitForIdle()
-            device.pressBack(); device.waitForIdle()
+            clickDescription("关闭规则出处")
+            assertTrue(device.wait(Until.gone(By.desc("关闭规则出处")), 15_000) == true)
+            closePanel("规则")
 
             click("记事")
             waitContains("来源事件 1")
@@ -101,7 +101,9 @@ class AgentBlackBoxTest {
             waitText("记事来源")
             waitContains("调查这里")
             screenshot("agent-07b-memory-original-record")
-            device.pressBack(); device.waitForIdle()
+            clickDescription("关闭记事来源")
+            assertTrue(device.wait(Until.gone(By.desc("关闭记事来源")), 15_000) == true)
+            waitText("更正")
             click("更正")
             waitText("更正记事")
             fillFirstField("玩家补记：已在大厅进行一次调查。")
@@ -117,7 +119,7 @@ class AgentBlackBoxTest {
                     assertEquals(1, statuses["SUPERSEDED"])
                 }
             }
-            device.pressBack(); device.waitForIdle()
+            closePanel("记事")
             waitText("已保存更正，原条目保留。")
             val expected = JSONObject().put("campaignId", id).put("title", title).put("event", recordedEvent)
                 .put("revision", 1).put("turnId", turn.getString("id")).put("modelFingerprint", "explicit-demo-v1")
@@ -174,17 +176,28 @@ class AgentBlackBoxTest {
         waitText("旧版内置模组开团")
     }
     private fun fillFirstField(text: String) {
-        dismissKeyboardTutorial()
+        hideKnownKeyboard()
         val selector = By.clazz("android.widget.EditText").pkg(context.packageName)
         val field = requireNotNull(device.wait(Until.findObject(selector), 15_000)) { "No app editable field visible" }
-        field.click(); device.waitForIdle()
-        dismissKeyboardTutorial()
-        requireNotNull(device.wait(Until.findObject(selector), 15_000)).text = text
+        // ACTION_SET_TEXT is the accessible editing action; a preliminary tap unnecessarily
+        // launches the emulator's asynchronously displayed first-run keyboard tutorial.
+        field.text = text
         device.waitForIdle()
-        // Back only dismisses a positively identified IME. It must never navigate the app page.
-        if (device.hasObject(By.pkg("com.google.android.inputmethod.latin")) || device.hasObject(By.pkg("com.android.inputmethod.latin"))) {
-            device.pressBack(); device.waitForIdle()
+        assertTrue("The app must accept the exact entered text", device.wait(Until.hasObject(selector.text(text)), 15_000) == true)
+        hideKnownKeyboard()
+    }
+    private fun hideKnownKeyboard() {
+        repeat(4) {
+            dismissKeyboardTutorial()
+            // Back only dismisses a positively identified IME. It must never navigate the app.
+            val google = device.hasObject(By.pkg("com.google.android.inputmethod.latin"))
+            val aosp = device.hasObject(By.pkg("com.android.inputmethod.latin"))
+            if (!google && !aosp) return
+            device.pressBack()
+            device.wait(Until.gone(By.pkg(if (google) "com.google.android.inputmethod.latin" else "com.android.inputmethod.latin")), 2_000)
+            device.waitForIdle()
         }
+        assertFalse("Keyboard must be dismissed before navigating the form", device.hasObject(By.pkg("com.google.android.inputmethod.latin")) || device.hasObject(By.pkg("com.android.inputmethod.latin")))
     }
     private fun dismissKeyboardTutorial() {
         val close = device.findObject(By.res("com.google.android.inputmethod.latin", "access_points_hint_close_button"))
@@ -207,7 +220,16 @@ class AgentBlackBoxTest {
     private fun waitText(text: String) { assertTrue("Visible text missing: $text", device.wait(Until.hasObject(By.text(text)), 15_000) == true) }
     private fun waitContains(text: String) { assertTrue("Visible text missing: $text", device.wait(Until.hasObject(By.textContains(text)), 15_000) == true) }
     private fun click(text: String) { requireNotNull(device.wait(Until.findObject(By.text(text).enabled(true)), 15_000)) { "Missing action: $text" }.click(); device.waitForIdle() }
+    private fun clickDescription(description: String) { requireNotNull(device.wait(Until.findObject(By.desc(description).enabled(true)), 15_000)) { "Missing action: $description" }.click(); device.waitForIdle() }
+    private fun closePanel(name: String) {
+        val description = "关闭${name}面板"
+        clickDescription(description)
+        assertTrue("Panel must be closed: $name", device.wait(Until.gone(By.desc(description)), 15_000) == true)
+        waitText("人物")
+        waitText("记事")
+    }
     private fun scrollTo(text: String) {
+        hideKnownKeyboard()
         repeat(12) {
             if (device.wait(Until.hasObject(By.text(text)), 2_000) == true) return
             val pane = device.findObjects(By.scrollable(true)).maxByOrNull { it.visibleBounds.height() * it.visibleBounds.width() }
@@ -215,15 +237,6 @@ class AgentBlackBoxTest {
             device.waitForIdle()
         }
         waitText(text)
-    }
-    private fun scrollToContains(text: String) {
-        repeat(12) {
-            if (device.hasObject(By.textContains(text)) || device.hasObject(By.descContains(text))) return
-            val pane = device.findObjects(By.scrollable(true)).maxByOrNull { it.visibleBounds.height() * it.visibleBounds.width() }
-            requireNotNull(pane) { "No scroll pane while finding $text" }.scroll(Direction.DOWN, 0.72f)
-            device.waitForIdle()
-        }
-        waitContains(text)
     }
     private fun screenshot(name: String) { device.waitForIdle(); assertTrue(device.takeScreenshot(File(folder, "$name.png"))) }
 }

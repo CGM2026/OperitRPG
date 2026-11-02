@@ -142,9 +142,14 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                     }
                 }
             }
-            if (panel != null && play != null) ModalBottomSheet(onDismissRequest = { panel = null }, containerColor = MaterialTheme.colorScheme.background) {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 28.dp, end = 28.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(panel!!, style = MaterialTheme.typography.titleLarge)
+            if (panel != null && play != null) ModalBottomSheet(onDismissRequest = { panel = null },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).padding(start = 28.dp, end = 28.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(panel!!, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { dismissKeyboard(); panel = null }, modifier = Modifier.semantics { contentDescription = "关闭${panel}面板" }) { Text("关闭") }
+                    }
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     when (panel) {
                         "人物" -> { play.people.forEach { Detail(it.name, it.detail) }; if (play.people.isEmpty()) Text("当前没有已知人物。") }
                         "线索" -> { play.facts.forEach { Text(it) }; play.objectives.forEach { Text(it) }; if (play.facts.isEmpty() && play.objectives.isEmpty()) Text("当前没有已知线索。") }
@@ -174,6 +179,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                             Text("备份包含本团依赖模组与原文，不含 API Key。中断回合需先处理。", style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    }
                 }
             }
             selectedEvidence?.let { evidence -> AlertDialog(onDismissRequest = { selectedEvidence = null }, title = { Text(evidence.source.anchor) }, text = {
@@ -182,7 +188,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                     Text("${evidence.source.sourceId.substringAfterLast('/')} · ${evidence.source.anchor}", style = MaterialTheme.typography.bodySmall)
                     Text(authorityText(evidence.source.authority), style = MaterialTheme.typography.bodySmall)
                 }
-            }, confirmButton = { TextButton(onClick = { selectedEvidence = null }) { Text("关闭") } }) }
+            }, confirmButton = { TextButton(onClick = { selectedEvidence = null }, modifier = Modifier.semantics { contentDescription = "关闭规则出处" }) { Text("关闭") } }) }
             correcting?.let { original -> AlertDialog(onDismissRequest = { correcting = null }, title = { Text("更正记事") }, text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("原内容：${original.text}")
@@ -193,7 +199,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
             state.preview?.let { preview -> AlertDialog(onDismissRequest = controller::dismissPreview, title = { Text(preview.title) }, text = { Text(preview.detail, Modifier.verticalScroll(rememberScrollState())) },
                 confirmButton = { TextButton(onClick = controller::commitImport, enabled = !state.busy) { Text(if (preview.module) "确认安装" else "保存参考资料") } }, dismissButton = { TextButton(onClick = controller::dismissPreview) { Text("取消") } }) }
             state.draft?.let { draft -> AgentDraftDialog(draft, state.busy, controller) }
-            state.documentText?.let { (title, text) -> AlertDialog(onDismissRequest = controller::dismissDocument, title = { Text(title) }, text = { Text(text, Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = controller::dismissDocument) { Text("关闭") } }) }
+            state.documentText?.let { (title, text) -> AlertDialog(onDismissRequest = controller::dismissDocument, title = { Text(title) }, text = { Text(text, Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = controller::dismissDocument, modifier = Modifier.semantics { contentDescription = "关闭$title" }) { Text("关闭") } }) }
         }
     }
 }
@@ -211,17 +217,17 @@ private fun authorityText(value: String) = when (value) { "temporary", "house_ru
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         OutlinedTextField(title, { title = it }, label = { Text("战役名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Text("选择模组", style = MaterialTheme.typography.titleMedium)
-        state.modules.forEach { candidate -> OutlinedButton(onClick = { moduleId = candidate.ref.hash; characterId = null }, modifier = Modifier.fillMaxWidth()) { Text(candidate.title + " · " + candidate.ref.version + if (moduleId == candidate.ref.hash) " ✓" else "") } }
+        state.modules.forEach { candidate -> OutlinedButton(onClick = { dismissKeyboard(); moduleId = candidate.ref.hash; characterId = null }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "选择模组 · ${candidate.title}" }) { Text(candidate.title + " · " + candidate.ref.version + if (moduleId == candidate.ref.hash) " ✓" else "") } }
         if (state.modules.isEmpty()) Text("先导入一个通过校验的模组，再开始长团。")
         TextButton(onClick = onLibrary) { Text("导入模组与资料") }
         module?.let { selected ->
             Text(selected.description)
             Text("选择角色", style = MaterialTheme.typography.titleMedium)
-            selected.characters.forEach { character -> OutlinedButton(onClick = { characterId = character.id }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "选择角色 · ${character.name}" }) { Column { Text(character.name + if (characterId == character.id) " ✓" else ""); Text(character.detail, style = MaterialTheme.typography.bodySmall) } } }
+            selected.characters.forEach { character -> OutlinedButton(onClick = { dismissKeyboard(); characterId = character.id }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "选择角色 · ${character.name}" }) { Column { Text(character.name + if (characterId == character.id) " ✓" else ""); Text(character.detail, style = MaterialTheme.typography.bodySmall) } } }
         }
         Row { Switch(checked = allow, onCheckedChange = { allow = it }); Column(Modifier.padding(start = 12.dp)) { Text(if (allow) "允许补充细节" else "严格采用模组"); Text(if (allow) "在模组允许范围内补充人物、场景和支线。" else "按模组既有内容推进。", style = MaterialTheme.typography.bodySmall) } }
         Text("选择模型", style = MaterialTheme.typography.titleMedium)
-        state.models.forEach { model -> OutlinedButton(onClick = { modelId = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (modelId == model.id) " ✓" else "") } }
+        state.models.forEach { model -> OutlinedButton(onClick = { dismissKeyboard(); modelId = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (modelId == model.id) " ✓" else "") } }
         TextButton(onClick = onModels) { Text("模型配置") }
         Button(onClick = { dismissKeyboard(); controller.create(title.trim(), requireNotNull(module).ref, requireNotNull(characterId), allow, requireNotNull(modelId)) },
             enabled = !state.busy && title.isNotBlank() && title.length <= 100 && module != null && characterId != null && state.models.any { it.id == modelId }, modifier = Modifier.fillMaxWidth()) { Text("开始战役") }
