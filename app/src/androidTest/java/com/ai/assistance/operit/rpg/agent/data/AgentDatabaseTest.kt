@@ -6,6 +6,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.ai.assistance.operit.rpg.agent.contract.*
 import com.ai.assistance.operit.rpg.agent.rules.initialWorld
 import com.ai.assistance.operit.rpg.agent.tools.StrictJson
+import com.ai.assistance.operit.rpg.agent.module.ExampleModules
+import com.ai.assistance.operit.rpg.agent.engine.AgentCoordinator
+import com.ai.assistance.operit.rpg.agent.engine.DemoTextModelPort
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -151,5 +155,28 @@ class AgentDatabaseTest {
   assertEquals(originalWorld,store.loadCampaign("a")!!.world)
   assertEquals(originalWorld,store.loadCampaign(restored.campaignId)!!.world)
   assertTrue(memory.search(RoleContext("b",Audience.PUBLIC),"青禾",emptyList(),5).isEmpty())
+ }
+ @Test fun realTwelveNpcModuleTwoActionsReopenAndBackupIgnoreOnlyCollectionOrder()=runBlocking {
+  val m=ExampleModules.all().first();assertEquals(12,m.world.npcs.size)
+  val catalog=RoomModuleCatalog(db);catalog.install(m)
+  val engine=AgentCoordinator(store,catalog,RoomRuleRepository(db),RoomMemoryRepository(db),DemoTextModelPort(m),DiceSource{1},Clock{0})
+  val ref=VersionRef(m.manifest.moduleId,m.manifest.version,m.contentHash)
+  engine.create("twelve","真实示例备份",ref,m.world.characters.first().id,false,"demo")
+  assertEquals(TurnPhase.COMPLETE,engine.submit("twelve","wait","等待").phase)
+  assertEquals(TurnPhase.COMPLETE,engine.submit("twelve","talk","交谈${m.world.npcs.first().name}").phase)
+  val before=store.loadCampaign("twelve")!!;assertEquals(2L,before.lastEventSeq)
+  // Deliberately vary persistence order. No field or entity identity changes.
+  store.transaction("twelve"){tx->val c=tx.session.campaign;tx.saveCampaign(c.copy(world=c.world.copy(npcs=c.world.npcs.reversed(),facts=c.world.facts.reversed(),items=c.world.items.reversed(),objectives=c.world.objectives.reversed())))}
+  db.close();open()
+  val reopened=store.loadCampaign("twelve")!!
+  assertEquals(canonicalWorld(before.world),canonicalWorld(reopened.world))
+  val service=AgentBackupService(db,context.cacheDir);val out=ByteArrayOutputStream();service.export("twelve",out)
+  val restored=service.importBackup(ByteArrayInputStream(out.toByteArray()))
+  db.close();open()
+  val after=store.loadCampaign(restored.campaignId)!!
+  assertEquals(12,after.world.npcs.size);assertEquals(canonicalWorld(before.world),canonicalWorld(after.world))
+  assertEquals(2,store.events(after.id,0,100).size)
+  assertEquals(2,store.history(after.id,null,100).size)
+  assertEquals(5,after.world.npcs.single{it.id==m.world.npcs.first().id}.relationships["trust"])
  }
 }

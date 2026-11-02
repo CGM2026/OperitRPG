@@ -76,10 +76,11 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
    val original=decode<Campaign>(read(dir,"campaign.json"));val initial=decode<WorldState>(read(dir,"initial.json"))
    require(original.module==manifest.module && original.rules==manifest.rules && original.modelFingerprint.isEmpty())
    adapter.validateState(initial,module)
-   require(module.world.characters.any{initialWorld(module,it.id)==initial}){"INVALID_INITIAL_STATE"}
+   val canonicalInitial=canonicalWorld(initial)
+   require(module.world.characters.any{canonicalWorld(initialWorld(module,it.id))==canonicalInitial}){"INVALID_INITIAL_STATE"}
    var replay=initial;var seq=0L
    eachLine(dir,"events.jsonl"){line->val event=decode<WorldEvent>(line);require(event.campaignId==original.id && event.seq==++seq && event.eventVersion==1);replay=adapter.applyRecordedEvent(replay,event,module)}
-   require(seq==original.lastEventSeq && replay==original.world && original.revision==seq){"BACKUP_REPLAY_MISMATCH"}
+   require(seq==original.lastEventSeq && canonicalWorld(replay)==canonicalWorld(original.world) && original.revision==seq){"BACKUP_REPLAY_MISMATCH"}
    val newId=UUID.randomUUID().toString()
    fun mapped(id:String)="$newId:$id"
    return db.atomic {
