@@ -4,11 +4,13 @@ import java.security.MessageDigest
 
 /** FTS receives only quoted generated terms, never user-provided MATCH syntax. */
 object ChineseSearch {
+ // Android API 26 ICU rejects Java's IsHan alias; literal BMP ranges work on both runtimes.
+ private val searchable=Regex("[\u3400-\u4DBF\u4E00-\u9FFF]+|[a-zA-Z0-9_:-]+")
  fun terms(text:String):List<String> {
   val out=linkedSetOf<String>()
-  Regex("[\\p{IsHan}]+|[a-zA-Z0-9_:-]+").findAll(text.lowercase()).forEach { match->
+  searchable.findAll(text.lowercase()).forEach { match->
    val s=match.value
-   if(s.first().code in 0x3400..0x9fff){s.forEach{out+=it.toString()};s.windowed(2).forEach{out+=it}}else out+=s
+   if(s.first().code in 0x3400..0x4dbf || s.first().code in 0x4e00..0x9fff){s.forEach{out+=it.toString()};s.windowed(2).forEach{out+=it}}else out+=s
   }
   return out.take(256)
  }

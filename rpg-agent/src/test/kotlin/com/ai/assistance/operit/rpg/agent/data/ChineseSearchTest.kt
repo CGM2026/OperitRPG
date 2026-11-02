@@ -4,6 +4,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChineseSearchTest {
+ @Test fun basicAndExtensionAHanUsePortableLiteralRanges(){
+  assertEquals(listOf("㐀","汉","㐀汉","rule-1"),ChineseSearch.terms("㐀汉 RULE-1"))
+  assertEquals(listOf("汉","字"),ChineseSearch.terms("汉䷀字"))
+  assertEquals("\"㐀汉\"",ChineseSearch.query("㐀汉"))
+ }
  @Test fun chineseBigramsAndSingleCharacterQueriesAreExplicit(){
   assertTrue(ChineseSearch.terms("船工承诺").containsAll(listOf("船","船工","工承","承诺")))
   assertEquals("\"船\"",ChineseSearch.query("船"))

@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/CGM2026/OperitRPG
-status: proposed
+status: test-candidate
 date: 2026-11-02
 baseline: rpg-v0.2.0
 source_commit: 6ec6dea2dfb9f87d5401e76d50393718b3f45837
@@ -8,7 +8,7 @@ source_commit: 6ec6dea2dfb9f87d5401e76d50393718b3f45837
 
 # 二十面骰 0.3：可持续跑团的专用 Agent
 
-本轮交付开发方案，尚未实施或发布 0.3。目标是让用户在手机导入模组，使用有出处的规则，通过自然语言持续行动；主持能够查询过去发生的事情，维护 NPC 的位置、关系、目标和知情范围，并在中断后准确继续。0.2 的旧战役与手机更新继续可用。
+此文保留 0.3 完整开发目标。现已实施可安装测试候选，实际实现范围见 [实施记录](IMPLEMENTATION.md)、[运行时限制](../../../rpg-agent/README.md) 和 [存储实现](storage-implementation.md)。用户已明确选择先验收安装版，真实模型由用户测试；离场 NPC 自主调度、自动摘要及结构化承诺抽取尚未实现，不把下面的全部长期目标标为完成。0.2 的旧战役与手机更新继续保留。
 
 ## 当前结构与必须解决的问题
 
