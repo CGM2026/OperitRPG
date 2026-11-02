@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.io.File
 
 /** Drop-in control for the RPG settings screen. No background downloads or implicit installs. */
@@ -34,6 +35,7 @@ fun RpgUpdateButton(modifier: Modifier = Modifier) {
     fun release() = RpgRelease(version, code, notes, url, bytes, sha)
     fun install() {
         try { manager.install(File(path), release()); message = "已打开系统安装页面；取消后可再次安装。" }
+        catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { message = error.message ?: "安装启动失败，请重试" }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -55,7 +57,8 @@ fun RpgUpdateButton(modifier: Modifier = Modifier) {
                     url = found.url; bytes = found.bytes; sha = found.sha256
                     message = "发现新版 $version，下载大小 ${bytes / 1024 / 1024} MB。"
                 }
-            } catch (error: Exception) { message = error.message ?: "检查失败，请重试" }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { message = error.message ?: "检查失败，请重试" }
             finally { busy = false }
         }
     }) { Text("检查新版") }
@@ -64,6 +67,7 @@ fun RpgUpdateButton(modifier: Modifier = Modifier) {
         title = { Text("雨夜跑团更新") },
         text = { Column {
             Text(message)
+            if (version.isNotEmpty() && path.isEmpty()) Text("下载时请保持当前页面；旋转屏幕后可安全重试。")
             if (version.isNotEmpty()) Text(notes.take(4000))
             if (busy && version.isNotEmpty()) LinearProgressIndicator(progress = { progress })
         } },
@@ -78,7 +82,8 @@ fun RpgUpdateButton(modifier: Modifier = Modifier) {
                             path = manager.download(release()) { progress = it }.path
                             message = "校验通过，准备安装。"
                             if (manager.canInstall()) install() else permission.launch(manager.permissionIntent())
-                        } catch (error: Exception) { message = error.message ?: "下载失败，请重试"; path = "" }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) { message = error.message ?: "下载失败，请重试"; path = "" }
                         finally { busy = false }
                     }
                 }

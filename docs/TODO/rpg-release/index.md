@@ -27,6 +27,8 @@ fork: https://github.com/CGM2026/OperitRPG
 
 设置页面调用 `com.ai.assistance.operit.rpg.update.RpgUpdateButton()`。用户点击“检查新版”才请求 GitHub latest release 和该标签中的 manifest；确认“下载并安装”才下载 APK。应用显示下载进度，核对 SHA256、大小、包名、versionCode、versionName 和当前已安装版本的签名证书。系统未知来源安装设置返回后继续安装，取消或失败可重试。
 
+每次下载使用独立 UUID 缓存文件，取消或失败只删除本次文件。读取循环检查协程取消；旋转导致页面重建时停止旧请求，新页面可安全重试，不会覆盖或删除其他下载。
+
 更新只接受规定 GitHub HTTPS 域名和本仓库对应版本的 APK，逐次验证重定向；manifest 最大 1 MiB，APK 最大 2 GiB。APK 保存在应用私有缓存，通过现有 FileProvider 和 `REQUEST_INSTALL_PACKAGES` 打开系统安装页面。系统最终安装仍由用户确认。调试包身份带 `.debug`，与正式更新通道身份不同。
 
 ## 检查记录

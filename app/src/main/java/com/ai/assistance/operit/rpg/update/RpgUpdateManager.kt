@@ -16,13 +16,13 @@ import org.json.JSONObject
 import java.io.File
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import java.util.UUID
 
 /** Every update remains tied to this repository, package and installed signing certificate. */
 class RpgUpdateManager(private val context: Context) {
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .connectTimeout(30, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
     private val repository = RpgUpdatePolicy.REPOSITORY
-    private val apkFile get() = File(context.cacheDir, "rpg-update/update.apk")
 
     private fun get(url: String): okhttp3.Response {
         var target = url
@@ -67,9 +67,10 @@ class RpgUpdateManager(private val context: Context) {
     }
 
     suspend fun download(release: RpgRelease, progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
-        val output = apkFile
+        // Rotation can cancel a previous UI request while its blocking read is still ending.
+        // Each request owns its file, including cleanup on cancellation or verification failure.
+        val output = File(context.cacheDir, "rpg-update/update-${UUID.randomUUID()}.apk")
         output.parentFile!!.mkdirs()
-        output.delete()
         try {
             get(release.url).use { response ->
                 val body = requireNotNull(response.body)
