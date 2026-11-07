@@ -26,7 +26,7 @@ const val LONGFORM_ENGINE = "longform-v1"
 @Serializable data class Condition(val type: String, val targetId: String? = null, val key: String? = null, val value: String? = null, val children: List<Condition> = emptyList())
 @Serializable data class Effect(val type: String, val targetId: String, val key: String? = null, val amount: Int? = null, val value: String? = null, val source: SourceRef)
 @Serializable data class EntityCreation(val type: String, val id: String, val title: String, val locationId: String, val description: String, val source: SourceRef)
-@Serializable data class ActionDefinition(val id: String, val title: String, val actionType: String, val targetIds: List<String>, val skill: String?, val difficulty: String, val ruleId: String, val conditions: List<Condition>, val successEffects: List<Effect>, val failureEffects: List<Effect>)
+@Serializable data class ActionDefinition(val id: String, val title: String, val actionType: String, val targetIds: List<String>, val skill: String?, val difficulty: String, val ruleId: String, val conditions: List<Condition>, val successEffects: List<Effect>, val failureEffects: List<Effect>, val check: ActionCheck? = null)
 /** Host-side timed or conditional event. `atMinute` set: timed. `atMinute` null: conditional, `conditions` non-empty. [label] is never shown to the player. */
 @Serializable data class ScheduledEvent(val id: String, val label: String, val atMinute: Long? = null, val conditions: List<Condition> = emptyList(), val delayMinutes: Int = 0, val cancelIf: List<Condition> = emptyList(), val effects: List<Effect>, val notice: String? = null)
 /** state: pending | armed | fired | skipped | cancelled. [fireAt] is set once armed. */

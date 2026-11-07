@@ -109,7 +109,10 @@ class WuxiaD20 : RuleAdapter {
         w.actions.forEach { a ->
             val actionLocation = a.conditions.firstOrNull { it.type == "location" }?.targetId ?: w.startLocationId
             val local = campaign.copy(world = campaign.world.copy(locationId = actionLocation))
-            validateProposal(local, module, ActionProposal(a.actionType, a.targetIds, a.skill, a.difficulty, listOf(a.ruleId), a.conditions, a.successEffects, a.failureEffects, publicSummary = a.title), r.evidence)
+            val check = a.check
+            require((check != null) == (a.actionType == "d20")) { "ACTION_CHECK_MISMATCH" }
+            val rolls = if (check == null) emptyList() else listOf(D20Action("check", w.characters.first().id, skill = check.skill, dcTier = check.dcTier))
+            validateProposal(local, module, ActionProposal(a.actionType, a.targetIds, a.skill, a.difficulty, listOf(a.ruleId), a.conditions, a.successEffects, a.failureEffects, publicSummary = a.title, d20 = rolls), r.evidence)
         }
         Scheduler.validateModule(module, campaign.world)
         validateState(campaign.world, module)
@@ -229,7 +232,6 @@ class WuxiaD20 : RuleAdapter {
         }
         if (proposal.actionType == "d20") {
             require(proposal.d20.isNotEmpty() && proposal.d20.size <= 6) { "D20_ACTIONS_REQUIRED" }
-            require(proposal.failureEffects.isEmpty()) { "FAILURE_EFFECTS_UNUSED" }
             validateD20Actions(campaign, module, proposal.d20)
         } else {
             require(proposal.d20.isEmpty()) { "D20_NOT_ALLOWED" }
@@ -347,9 +349,11 @@ class WuxiaD20 : RuleAdapter {
         val p = plan.proposal
         val settle = Run(module, rulesOf(module), campaign.world, dice)
         val outcomes = p.d20.map { settle.perform(it) }
-        if (p.actionType == "d20") settle.closeExchange(p.d20.first().actorId, p.successEffects)
+        // The player's own action is first; its outcome picks the narrative branch, so a failed check never grants success effects.
         val success = if (outcomes.isEmpty()) true else outcomes.first()
-        val base = WorldEvent(2, campaign.id, campaign.lastEventSeq + 1, turnId, p.successEffects, p.creations, null, Visibility(Audience.PUBLIC), (plan.evidence.map { it.source } + p.successEffects.map { it.source }).distinct(), settle.rolls.toList(), settle.changes.toList())
+        val branch = if (success) p.successEffects else p.failureEffects
+        if (p.actionType == "d20") settle.closeExchange(p.d20.first().actorId, branch)
+        val base = WorldEvent(2, campaign.id, campaign.lastEventSeq + 1, turnId, branch, p.creations, null, Visibility(Audience.PUBLIC), (plan.evidence.map { it.source } + branch.map { it.source }).distinct(), settle.rolls.toList(), settle.changes.toList())
         val played = applyRecordedEvent(campaign.world, base, module)
         check(played.d20 == settle.world.d20) { "REPLAY_MISMATCH" }
         // The schedule runs on the world the player's action produced, including rest time and narrative time effects.

@@ -125,3 +125,5 @@ import kotlinx.serialization.Serializable
 
 /** Public view of a present NPC: name and condition labels only. */
 @Serializable data class D20VisibleNpc(val name: String, val conditions: List<String>)
+/** A module action that needs a d20 skill check: the player rolls [skill] against [dcTier]; success and failure effects follow the roll. */
+@Serializable data class ActionCheck(val skill: String, val dcTier: String)

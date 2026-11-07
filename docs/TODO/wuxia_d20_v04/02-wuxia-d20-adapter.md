@@ -235,3 +235,10 @@
 - `WorldState.d20` 以 JSON 文本持久化在战役行的新列 `d20Json`，可为 null。`AgentDatabase` 升到版本 2，提供 `Migration(1,2)` 用 `ALTER TABLE` 加列，不使用破坏性迁移。
 - `AgentBackupService` 的导出与恢复包含 `d20Json`，恢复后经适配器重放校验与之前一致。
 - 相应的 androidTest 增加 wuxia 战役的写入、重开与备份恢复用例。
+
+## 02c 修订：检定决定叙事分支
+
+原规格「d20 提议只应用成功分支」会让检定失败也拿到成功效果，已改为：
+
+- 玩家的第一项 d20 行动成功则应用 `successEffects`，失败则应用 `failureEffects`，两支都允许出现。
+- `ActionDefinition` 新增 `check: ActionCheck? = null`，`ActionCheck(skill, dcTier)`。武侠模组中需要掷骰的动作写 `actionType="d20"` 与 `check`；规划模型照此提出一项 `kind=check` 的 d20 行动。不掷骰的动作不写 `check`。

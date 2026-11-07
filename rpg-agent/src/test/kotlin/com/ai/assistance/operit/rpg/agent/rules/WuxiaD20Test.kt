@@ -342,12 +342,15 @@ class WuxiaD20Test {
         code("INVALID_REST_TYPE") { validate(c, prop(D20Action("rest", hero, restType = "nap"))) }
     }
 
-    @Test fun narrativeEffectsApplyAfterAllActionsAndOnlyAllowedKinds() {
+    @Test fun narrativeBranchFollowsThePlayersFirstRoll() {
         val time = Effect("time", "world", amount = 5, source = src)
-        val done = settle(fresh(), prop(checkAction(hero, skill = "athletics", tier = "hard"), effects = listOf(time)), Seq(1))
-        assertFalse(done.result.success)
-        assertEquals(5L, done.campaign.world.gameTime)
-        code("FAILURE_EFFECTS_UNUSED") { validate(fresh(), prop(checkAction(hero, skill = "athletics"), failure = listOf(time))) }
+        val slow = Effect("time", "world", amount = 7, source = src)
+        val failed = settle(fresh(), prop(checkAction(hero, skill = "athletics", tier = "hard"), effects = listOf(time), failure = listOf(slow)), Seq(1))
+        assertFalse(failed.result.success)
+        assertEquals(7L, failed.campaign.world.gameTime)
+        val passed = settle(fresh(), prop(checkAction(hero, skill = "athletics", tier = "easy"), effects = listOf(time), failure = listOf(slow)), Seq(19))
+        assertTrue(passed.result.success)
+        assertEquals(5L, passed.campaign.world.gameTime)
         code("UNKNOWN_EFFECT") { validate(fresh(), prop(checkAction(hero, skill = "athletics"), effects = listOf(Effect("resource", "player", key = "x", amount = 1, source = src)))) }
         code("D20_NOT_ALLOWED") { validate(fresh(), prop(checkAction(hero, skill = "athletics")).copy(actionType = "wait")) }
         code("SKILL_NOT_SUPPORTED") { validate(fresh(), prop(checkAction(hero, skill = "athletics")).copy(skill = "athletics")) }
