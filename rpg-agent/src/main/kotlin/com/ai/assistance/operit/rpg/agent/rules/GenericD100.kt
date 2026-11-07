@@ -62,7 +62,7 @@ class GenericD100 : RuleAdapter {
     override fun availableActions(campaign: Campaign, module: ValidatedModule): List<ActionDefinition> = module.world.actions.filter { it.conditions.all { c -> condition(c, campaign.world) } }
     override fun validateProposal(campaign: Campaign, module: ValidatedModule, proposal: ActionProposal, evidence: List<RuleEvidence>) {
         val w = campaign.world; val r = module.rules
-        require(proposal.actionType in actionTypes) { "UNKNOWN_ACTION" }
+        require(proposal.actionType in actionTypes && proposal.d20.isEmpty()) { "UNKNOWN_ACTION" }
         require(proposal.publicSummary.isNotBlank() && proposal.publicSummary.length <= 2000)
         require(proposal.difficulty in r.difficulties) { "UNKNOWN_DIFFICULTY" }
         require(proposal.skill == null || proposal.skill in w.skills) { "UNKNOWN_SKILL" }
@@ -91,8 +91,8 @@ class GenericD100 : RuleAdapter {
             require(c.source.authority == "generated" && module.world.locations.any { it.id == c.locationId } && c.description.length <= 2000)
         }
     }
-    private fun count(c: Condition, depth: Int): Int { require(depth <= 8) { "CONDITION_DEPTH" }; return 1+c.children.sumOf { count(it,depth+1) } }
-    private fun validateCondition(c: Condition,w:WorldState,m:ValidatedModule) {
+    internal fun count(c: Condition, depth: Int): Int { require(depth <= 8) { "CONDITION_DEPTH" }; return 1+c.children.sumOf { count(it,depth+1) } }
+    internal fun validateCondition(c: Condition,w:WorldState,m:ValidatedModule) {
         require(c.type in setOf("all","any","not","location","resource_gte","fact_known","objective","time_gte")) { "UNKNOWN_CONDITION" }
         when(c.type) {
             "all","any" -> require(c.children.isNotEmpty())
@@ -114,22 +114,7 @@ class GenericD100 : RuleAdapter {
         "time_gte" -> w.gameTime >= requireNotNull(c.value).toLong()
         else -> error("UNKNOWN_CONDITION")
     }
-    private fun validateEffect(e:Effect,w:WorldState,m:ValidatedModule) {
-        require(e.type in m.rules.allowedEffects && e.type in effects) { "UNKNOWN_EFFECT" }
-        require(e.source.authority in setOf("module_rule","module_custom","temporary_ruling")) { "INVALID_EFFECT_SOURCE" }
-        if(e.source.authority != "temporary_ruling" && e.source.authority != "generated") require(m.rules.evidence.any { it.source == e.source }) { "INVALID_EFFECT_SOURCE" }
-        when(e.type) {
-            "move" -> require(m.world.locations.any { it.id == e.targetId } && m.world.locations.single { it.id == w.locationId }.exits.contains(e.targetId)) { "UNREACHABLE" }
-            "resource" -> require(e.targetId == "player" && e.key in m.rules.resourceBounds && e.amount != null && e.amount in -1000..1000)
-            "transfer_item" -> require(w.items.any { it.id == e.targetId } && (e.value == "player" || w.npcs.any { it.id == e.value && it.locationId == w.locationId }))
-            "reveal_fact" -> require(w.facts.any { it.id == e.targetId })
-            "objective" -> require(w.objectives.any { it.id == e.targetId } && e.value in setOf("active","complete","failed"))
-            "npc_status" -> require(w.npcs.any { it.id == e.targetId && it.locationId == w.locationId } && e.value in setOf("idle","helpful","hostile","busy","injured","departed"))
-            "npc_relation" -> require(w.npcs.any { it.id == e.targetId && it.locationId == w.locationId } && e.key in setOf("trust","fear","respect") && e.amount != null && e.amount in -20..20)
-            "knowledge" -> require(w.npcs.any { it.id == e.targetId && it.locationId == w.locationId } && w.facts.any { it.id == e.value && it.visibility.audience == Audience.PUBLIC }) { "NPC_CANNOT_KNOW" }
-            "time" -> require(e.targetId == "world" && e.amount != null && e.amount in 1..1440)
-        }
-    }
+    private fun validateEffect(e:Effect,w:WorldState,m:ValidatedModule) = NarrativeEffects.validate(e,w,m,effects)
     override fun resolve(campaign:Campaign,plan:FrozenPlan,module:ValidatedModule,turnId:String,dice:DiceSource):Pair<WorldEvent,CommittedResult> {
         require(campaign.revision == plan.baseRevision && campaign.module.hash == plan.moduleHash && campaign.rules.hash == plan.rulesHash && campaign.modelFingerprint == plan.modelFingerprint) { "STALE_PROPOSAL" }
         validateProposal(campaign,module,plan.proposal,plan.evidence)
@@ -146,18 +131,7 @@ class GenericD100 : RuleAdapter {
         var w=world
         event.effects.forEach { e ->
             validateEffect(e,w,module)
-            w=when(e.type) {
-                "move" -> w.copy(locationId=e.targetId)
-                "resource" -> { val key=requireNotNull(e.key); val value=w.resources.getValue(key)+requireNotNull(e.amount); val bounds=module.rules.resourceBounds.getValue(key); require(value in bounds.min..bounds.max) { "RESOURCE_BOUNDS" }; w.copy(resources=w.resources+(key to value)) }
-                "transfer_item" -> w.copy(items=w.items.map { if(it.id==e.targetId)it.copy(ownerId=requireNotNull(e.value)) else it })
-                "reveal_fact" -> w.copy(facts=w.facts.map { if(it.id==e.targetId)it.copy(visibility=Visibility(Audience.PUBLIC)) else it })
-                "objective" -> w.copy(objectives=w.objectives.map { if(it.id==e.targetId)it.copy(status=requireNotNull(e.value)) else it })
-                "npc_status" -> w.copy(npcs=w.npcs.map { if(it.id==e.targetId)it.copy(status=requireNotNull(e.value)) else it })
-                "npc_relation" -> w.copy(npcs=w.npcs.map { if(it.id==e.targetId) { val key=requireNotNull(e.key); val value=(it.relationships[key]?:0)+requireNotNull(e.amount); require(value in -100..100); it.copy(relationships=it.relationships+(key to value)) } else it })
-                "knowledge" -> { val edge=KnowledgeEdge(e.targetId,requireNotNull(e.value),event.seq,"heard","believed"); w.copy(knowledge=w.knowledge.filterNot { it.knowerId==edge.knowerId && it.factId==edge.factId }+edge) }
-                "time" -> w.copy(gameTime=Math.addExact(w.gameTime,requireNotNull(e.amount).toLong()))
-                else -> error("UNKNOWN_EFFECT")
-            }
+            w=NarrativeEffects.apply(w,e,event.seq,module)
         }
         event.creations.forEach { c ->
             require(c.source.authority == "generated" && c.type in module.world.policy.allowedEntityTypes && w.generated.none { it.id==c.id })
@@ -171,8 +145,12 @@ class GenericD100 : RuleAdapter {
         require(world.gameTime>=0 && world.generated.size<=module.world.policy.maxEntities)
         require(world.knowledge.all { k -> world.facts.any { it.id==k.factId } && (k.knowerId=="player" || world.npcs.any { it.id==k.knowerId }) })
     }
-    private fun exists(id:String,w:WorldState,m:ValidatedModule)= id=="player" || id=="world" || m.world.locations.any { it.id==id } || w.npcs.any { it.id==id } || w.items.any { it.id==id } || w.facts.any { it.id==id } || w.objectives.any { it.id==id } || w.generated.any { it.id==id }
+    internal fun exists(id:String,w:WorldState,m:ValidatedModule)= id=="player" || id=="world" || m.world.locations.any { it.id==id } || w.npcs.any { it.id==id } || w.items.any { it.id==id } || w.facts.any { it.id==id } || w.objectives.any { it.id==id } || w.generated.any { it.id==id }
 }
 fun validVisibility(v:Visibility)= when(v.audience) { Audience.PUBLIC,Audience.GM -> v.subjectId==null; Audience.NPC,Audience.FACTION -> !v.subjectId.isNullOrBlank() }
-fun initialWorld(module:ValidatedModule,characterId:String):WorldState { val c=module.world.characters.single { it.id==characterId }; return WorldState(module.world.startLocationId,c.resources,c.skills,module.world.npcs,module.world.items,module.world.facts,module.world.objectives,emptyList()) }
+fun initialWorld(module:ValidatedModule,characterId:String):WorldState {
+    val c=module.world.characters.single { it.id==characterId }
+    val world=WorldState(module.world.startLocationId,c.resources,c.skills,module.world.npcs,module.world.items,module.world.facts,module.world.objectives,emptyList())
+    return if(module.rules.adapterId==WuxiaD20.ID) world.copy(d20=WuxiaD20.initialState(module,characterId)) else world
+}
 fun freeze(c:Campaign,p:ActionProposal,evidence:List<RuleEvidence>):FrozenPlan { val hash=digest(Json.encodeToString(p)+c.revision+c.module.hash+c.rules.hash+c.modelFingerprint+Json.encodeToString(evidence)); return FrozenPlan(c.revision,c.module.hash,c.rules.hash,c.modelFingerprint,p,evidence,hash) }
