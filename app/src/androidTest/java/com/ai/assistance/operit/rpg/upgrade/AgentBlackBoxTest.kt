@@ -216,7 +216,7 @@ class AgentBlackBoxTest {
     }
     private fun latestTurn(id: String): JSONObject = readDb { db -> db.rawQuery("SELECT json FROM turn WHERE campaignId=? ORDER BY ordinal DESC LIMIT 1", arrayOf(id)).use { c -> assertTrue(c.moveToFirst()); JSONObject(c.getString(0)) } }
     private fun event(id: String): String = readDb { db -> db.rawQuery("SELECT json FROM event WHERE campaignId=? ORDER BY seq", arrayOf(id)).use { c -> assertTrue(c.moveToFirst()); val event = c.getString(0); assertFalse("Exactly one event must be committed", c.moveToNext()); event } }
-    private fun <T> readDb(block: (SQLiteDatabase) -> T): T = SQLiteDatabase.openDatabase(context.getDatabasePath("rpg-agent.db").path, null, SQLiteDatabase.OPEN_READONLY).use(block)
+    private fun <T> readDb(block: (SQLiteDatabase) -> T): T = SQLiteDatabase.openDatabase(context.getDatabasePath("d20-v05.db").path, null, SQLiteDatabase.OPEN_READONLY).use(block)
     private fun waitText(text: String) { assertTrue("Visible text missing: $text", device.wait(Until.hasObject(By.text(text)), 15_000) == true) }
     private fun waitContains(text: String) { assertTrue("Visible text missing: $text", device.wait(Until.hasObject(By.textContains(text)), 15_000) == true) }
     private fun click(text: String) { requireNotNull(device.wait(Until.findObject(By.text(text).enabled(true)), 15_000)) { "Missing action: $text" }.click(); device.waitForIdle() }

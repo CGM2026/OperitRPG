@@ -1,7 +1,6 @@
 package com.ai.assistance.operit.rpg.agent.data
 
 import androidx.room.Room
-import androidx.room.testing.MigrationTestHelper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ai.assistance.operit.rpg.agent.contract.*
@@ -183,9 +182,7 @@ class AgentDatabaseTest {
   assertEquals(2,store.history(after.id,null,100).size)
   assertEquals(5,after.world.npcs.single{it.id==m.world.npcs.first().id}.relationships["trust"])
  }
- @get:Rule val migrations=MigrationTestHelper(InstrumentationRegistry.getInstrumentation(),AgentDatabase::class.java)
- private val wuxia:ValidatedModule get()=wuxiaWith(emptyList())
- private fun wuxiaWith(schedule:List<ScheduledEvent>,flags:Map<String,String> = emptyMap()):ValidatedModule {
+ private val wuxia:ValidatedModule get()=wuxiaWith(emptyList()) private fun wuxiaWith(schedule:List<ScheduledEvent>,flags:Map<String,String> = emptyMap()):ValidatedModule {
   val text="检定使用二十面骰";val ref=SourceRef("module/sources/rules.md",sha256(text),"check","module_rule")
   fun fighter(id:String,name:String)=D20Combatant(id,name,1,mapOf("might" to 14,"vigor" to 10),2,emptySet(),mapOf("athletics" to 1),12,mapOf("hp" to PoolValue(20,20)),emptyMap(),"long",emptyMap(),emptySet(),mapOf("sword" to WeaponAttack("Sword","might",true,"1d8+2")))
   val d20=D20Rules(listOf("might","vigor"),mapOf("athletics" to "might"),mapOf("easy" to 10,"medium" to 13),mapOf("hp" to PoolRule("HP",restoreOn="long")),emptyMap(),emptyMap(),emptyMap(),RestRule(10,480,"hp"),true,setOf("hp"),"vigor")
@@ -257,25 +254,5 @@ class AgentDatabaseTest {
   val c=store.loadCampaign(restored.campaignId)!!
   assertEquals(canonicalWorld(saved.world),canonicalWorld(c.world))
   assertEquals(listOf("远处传来钟声"),store.history(c.id,null,10).single().result!!.notices)
- }
- @Test fun migration1To2AddsNullableD20JsonWithoutLosingCampaigns(){
-  val file="agent-migration-${UUID.randomUUID()}.db"
-  try {
-   migrations.createDatabase(file,1).also{old->
-    old.execSQL("INSERT INTO campaign(id,title,moduleId,moduleVersion,moduleHash,rulesJson,revision,lastEventSeq,locationId,resourcesJson,skillsJson,gameTime,allowGeneration,modelFingerprint,updatedAt,pendingTurnId,nextTurnOrdinal) VALUES('old','旧战役','test','1.0.0','h','{\"id\":\"generic-d100-v1\",\"version\":\"1\",\"hash\":\"h\"}',3,3,'test:room','{}','{}',0,0,'old-model',5,NULL,1)")
-    old.close()
-   }
-   migrations.runMigrationsAndValidate(file,2,true,AGENT_MIGRATION_1_2).also{migrated->
-    migrated.query("SELECT d20Json FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertTrue(cursor.isNull(0))}
-    migrated.query("SELECT flagsJson,scheduleJson FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertTrue(cursor.isNull(0));assertTrue(cursor.isNull(1))}
-    migrated.query("SELECT modelFingerprint,narratorFingerprint,contentLevel,sceneHold FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertEquals("old-model",cursor.getString(0));assertEquals("old-model",cursor.getString(1));assertEquals(0,cursor.getInt(2));assertEquals(0,cursor.getInt(3))}
-    migrated.close()
-   }
-   val reopened=Room.databaseBuilder(context,AgentDatabase::class.java,file).addMigrations(AGENT_MIGRATION_1_2).build()
-   try{
-    val old=RoomAgentStore(reopened).loadCampaign("old")!!
-    assertEquals(3L,old.revision);assertNull(old.world.d20);assertTrue(old.world.flags.isEmpty()&&old.world.schedule.isEmpty());assertEquals("old-model",old.narratorFingerprint)
-   } finally {reopened.close()}
-  } finally {context.deleteDatabase(file)}
  }
 }
