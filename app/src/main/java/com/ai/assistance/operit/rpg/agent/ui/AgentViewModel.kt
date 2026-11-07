@@ -4,6 +4,10 @@ import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -15,8 +19,10 @@ import com.ai.assistance.operit.rpg.agent.engine.DemoTextModelPort
 import com.ai.assistance.operit.rpg.agent.memory.PublicProjection
 import com.ai.assistance.operit.rpg.agent.module.ModuleZipImporter
 import com.ai.assistance.operit.rpg.agent.module.ExampleModules
+import com.ai.assistance.operit.rpg.domain.CampaignShelf
 import com.ai.assistance.operit.rpg.model.AgentTextModelPort
 import com.ai.assistance.operit.rpg.model.RpgModelConfigStore
+import com.ai.assistance.operit.rpg.ui.home.HomeScreen
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.File
@@ -24,16 +30,57 @@ import java.nio.charset.CodingErrorAction
 import java.security.SecureRandom
 import java.util.UUID
 
+/**
+ * [campaignId] opens that campaign directly; [newCampaign] starts the existing import/create flow.
+ * Both return to the shelf home when the play/create shell is left.
+ */
 @Composable
-fun D20AgentRoute(onModelSettings: () -> Unit) {
+fun D20AgentRoute(
+    onModelSettings: () -> Unit,
+    campaignId: String? = null,
+    newCampaign: Boolean = false,
+) {
     val controller: AgentViewModel = viewModel()
-    AgentScreen(controller, onModelSettings)
+    var screen by rememberSaveable {
+        mutableStateOf(if (campaignId != null || newCampaign) "agent" else "home")
+    }
+    var targetCampaign by rememberSaveable { mutableStateOf(campaignId) }
+    var startPage by rememberSaveable { mutableStateOf(if (newCampaign) "create" else "play") }
+    if (screen == "home") {
+        HomeScreen(
+            shelf = controller.campaignShelf,
+            onOpenCampaign = { id ->
+                targetCampaign = id
+                startPage = "play"
+                screen = "agent"
+            },
+            onNewCampaign = {
+                targetCampaign = null
+                startPage = "create"
+                screen = "agent"
+            },
+            onSettings = onModelSettings,
+        )
+    } else {
+        AgentScreen(
+            controller = controller,
+            onModelSettings = onModelSettings,
+            startPage = startPage,
+            campaignId = targetCampaign,
+            onExitHome = {
+                targetCampaign = null
+                startPage = "create"
+                screen = "home"
+            },
+        )
+    }
 }
 
 /** Keeps Android documents and jobs out of the composables. All disk work runs on IO. */
 class AgentViewModel(application: Application) : AndroidViewModel(application), AgentUiController {
     private val app = application
     private val db = AgentDatabase.get(app)
+    val campaignShelf: CampaignShelf = RoomCampaignShelf(db)
     private val store = RoomAgentStore(db)
     private val catalog = RoomModuleCatalog(db)
     private val rules = RoomRuleRepository(db)

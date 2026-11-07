@@ -11,38 +11,30 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.rpg.agent.contract.*
-import com.ai.assistance.operit.rpg.ui.avatar.Avatar
-import com.ai.assistance.operit.rpg.ui.avatar.AvatarCatalog
-import com.ai.assistance.operit.rpg.ui.avatar.AvatarKind
 import com.ai.assistance.operit.rpg.update.RpgUpdateButton
-
-private val agentColors = lightColorScheme(primary = Color(0xFF586B62), onPrimary = Color.White,
-    background = Color(0xFFF5F4F0), surface = Color(0xFFFCFBF8), onSurface = Color(0xFF303735),
-    onBackground = Color(0xFF303735), surfaceVariant = Color(0xFFE3E9E1),
-    error = Color(0xFF966F64), errorContainer = Color(0xFFEFE3DD), outline = Color(0xFFD9DDD6))
 
 /** Receives presentation values only. GM plans and tool output never enter this screen. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
+fun AgentScreen(
+    controller: AgentUiController,
+    onModelSettings: () -> Unit,
+    startPage: String,
+    campaignId: String?,
+    onExitHome: () -> Unit,
+) {
     val state by controller.state.collectAsState()
-    val context = LocalContext.current
-    val avatarCatalog = remember(context) { AvatarCatalog.load(context) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     fun dismissKeyboard() { focus.clearFocus(force = true); keyboard?.hide() }
-    var page by rememberSaveable { mutableStateOf("home") }
+    var page by rememberSaveable { mutableStateOf(startPage) }
     var panel by rememberSaveable { mutableStateOf<String?>(null) }
     var input by rememberSaveable { mutableStateOf("") }
     var selectedEvidence by remember { mutableStateOf<RuleEvidence?>(null) }
@@ -53,23 +45,31 @@ fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { it?.let(controller::exportBackup) }
     val play = state.play
     LaunchedEffect(controller) { controller.refresh() }
-    LaunchedEffect(play?.id) { if (play != null) page = "play" }
-    fun back() { if (panel != null) panel = null else if (page == "play") { if (!state.busy) { controller.close(); page = "home" } } else page = if (play != null) "play" else "home" }
-    BackHandler(enabled = panel != null || page != "home") { back() }
-    val baseTypography = Typography()
-    MaterialTheme(colorScheme = agentColors, typography = Typography(
-        bodyLarge = baseTypography.bodyLarge.copy(fontFamily = FontFamily.SansSerif),
-        bodyMedium = baseTypography.bodyMedium.copy(fontFamily = FontFamily.SansSerif),
-        titleLarge = baseTypography.titleLarge.copy(fontFamily = FontFamily.SansSerif),
-        titleMedium = baseTypography.titleMedium.copy(fontFamily = FontFamily.SansSerif))) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(when (page) { "create" -> "新的战役"; "library" -> "模组与资料"; "settings" -> "设置"; "play" -> play?.title ?: "二十面骰"; else -> "二十面骰" },
-                        style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    if (page == "home") TextButton(onClick = { page = "settings" }) { Text("设置") }
-                    else TextButton(onClick = { back() }) { Text("返回") }
-                }
+    var baselinePlayId by remember { mutableStateOf(play?.id) }
+    LaunchedEffect(campaignId) {
+        if (campaignId != null) {
+            page = "play"
+            controller.open(campaignId)
+        }
+    }
+    LaunchedEffect(play?.id) {
+        val id = play?.id
+        if (id != null && page == "create" && id != baselinePlayId) page = "play"
+    }
+    fun back() {
+        if (panel != null) panel = null
+        else if (page == "play") {
+            if (!state.busy) { controller.close(); onExitHome() }
+        } else onExitHome()
+    }
+    BackHandler { back() }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(when (page) { "create" -> "新的战役"; "library" -> "模组与资料"; "settings" -> "设置"; "play" -> play?.title ?: "二十面骰"; else -> "二十面骰" },
+                    style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = { back() }) { Text("返回") }
+            }
                 state.message?.let { message -> Surface(color = MaterialTheme.colorScheme.errorContainer,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
                     Row(Modifier.padding(12.dp)) {
@@ -83,23 +83,6 @@ fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
                     TextButton(onClick = controller::stop) { Text("停止") }
                 }
                 when (page) {
-                    "home" -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        item { Text("一个人，也能走进故事。", style = MaterialTheme.typography.bodyMedium) }
-                        item { Button(onClick = { page = "create" }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) { Text("新建战役") } }
-                        items(state.entries, key = { "${it.ref.engineId}:${it.ref.campaignId}" }) { entry ->
-                            OutlinedCard(onClick = { controller.open(entry.ref.campaignId) }, modifier = Modifier.fillMaxWidth()) {
-                                Row(Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Avatar(avatarCatalog.pick(AvatarKind.CAMPAIGN, entry.ref.campaignId), 44.dp)
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(entry.title, style = MaterialTheme.typography.titleMedium)
-                                        Text("长团 Agent", style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                            }
-                        }
-                        if (state.entries.isEmpty()) item { Text("从一个模组开始你的故事。已保存的战役会出现在这里。") }
-                        if (state.hasMoreEntries) item { TextButton(onClick = controller::loadMoreEntries, enabled = !state.busy) { Text("加载更多战役") } }
-                    }
                     "settings" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         OutlinedButton(onClick = { page = "library" }, Modifier.fillMaxWidth()) { Text("模组与资料") }
                         OutlinedButton(onClick = onModelSettings, Modifier.fillMaxWidth()) { Text("模型配置") }
@@ -214,7 +197,6 @@ fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
                 confirmButton = { TextButton(onClick = controller::commitImport, enabled = !state.busy) { Text(if (preview.module) "确认安装" else "保存参考资料") } }, dismissButton = { TextButton(onClick = controller::dismissPreview) { Text("取消") } }) }
             state.documentText?.let { (title, text) -> AlertDialog(onDismissRequest = controller::dismissDocument, title = { Text(title) }, text = { Text(text, Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = controller::dismissDocument, modifier = Modifier.semantics { contentDescription = "关闭$title" }) { Text("关闭") } }) }
         }
-    }
 }
 
 @Composable private fun Detail(title: String, detail: String) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(detail) } }
