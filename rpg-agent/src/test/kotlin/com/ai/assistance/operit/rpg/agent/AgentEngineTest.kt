@@ -90,7 +90,7 @@ class AgentEngineTest {
         override fun cancel(attemptId:String)=inner.cancel(attemptId)
         override suspend fun generate(attemptId:String,packet:ContextPacket):TextModelReply { packets+=packet; return inner.generate(attemptId,packet) }
     }
-    @Test fun plannerAndNarratorPortsAreSeparateAndRebindIndependently()=runBlocking {
+    @Test fun plannerAndNarratorPortsAreSeparateAndRebindIndependently()=runBlocking<Unit> {
         val planner=RecordingPort(DemoTextModelPort(m)); val narrator=RecordingPort(DemoTextModelPort(m))
         val (a,s)=fixture(planner,narrator=narrator)
         val first=a.submit("c","m1","等待")
@@ -122,7 +122,7 @@ class AgentEngineTest {
         a.submit("c","m3","等待"); assertTrue(narrator.packets.last().system.contains("GUIDE_HIGH"))
         assertEquals(0,a.adjustContentLevel("c",-1).contentLevel); assertEquals(0,a.adjustContentLevel("c",-1).contentLevel)
     }
-    @Test fun tableCommandsRequireDeclaredContentLevels()=runBlocking {
+    @Test fun tableCommandsRequireDeclaredContentLevels()=runBlocking<Unit> {
         val (a,_)=fixture()
         assertFails { a.holdScene("c") }; assertFails { a.adjustContentLevel("c",1) }
     }
