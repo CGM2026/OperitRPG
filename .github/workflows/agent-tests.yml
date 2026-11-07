@@ -54,13 +54,40 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: rpg-agent tests
-        run: ./gradlew -p rpg-agent test --console=plain
+        shell: bash
+        run: set -o pipefail; ./gradlew -p rpg-agent test --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-agent.log"
 
       - name: rpg-core tests
-        run: ./gradlew -p rpg-core test --console=plain
+        shell: bash
+        run: set -o pipefail; ./gradlew -p rpg-core test --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-core.log"
 
       - name: App debug Kotlin compile
-        run: ./gradlew :app:compileDebugKotlin --console=plain
+        shell: bash
+        run: set -o pipefail; ./gradlew :app:compileDebugKotlin --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-app.log"
+
+      # Run pages show annotations without sign-in; agents read failures from them.
+      - name: Publish failures as annotations
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob, os, re, xml.etree.ElementTree as ET
+          def esc(s): return s.replace('%','%25').replace('\r','').replace('\n','%0A')[:3000]
+          temp = os.environ['RUNNER_TEMP']
+          for log in glob.glob(temp + '/gradle-*.log'):
+              for line in open(log, encoding='utf-8', errors='replace'):
+                  m = re.match(r'^e: (?:file://)?(\S+?):(\d+):(\d+) (.*)', line.strip())
+                  if m:
+                      path = m[1].split('/OperitRPG/OperitRPG/')[-1]
+                      print(f"::error file={path},line={m[2]},col={m[3]},title=Kotlin compile::{esc(m[4])}")
+                  elif line.startswith('e: '):
+                      print(f"::error title=Kotlin compile::{esc(line[3:].strip())}")
+          for xml in glob.glob('rpg-*/build/test-results/test/*.xml'):
+              for case in ET.parse(xml).getroot().iter('testcase'):
+                  for bad in list(case.findall('failure')) + list(case.findall('error')):
+                      text = (bad.get('message') or '') + '\n' + (bad.text or '')[:1500]
+                      print(f"::error title={case.get('classname')}.{case.get('name')}::{esc(text)}")
+          PY
 
       - name: Upload test reports
         if: failure()
