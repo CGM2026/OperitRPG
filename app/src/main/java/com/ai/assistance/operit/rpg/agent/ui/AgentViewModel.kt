@@ -23,6 +23,7 @@ import com.ai.assistance.operit.rpg.domain.CampaignShelf
 import com.ai.assistance.operit.rpg.model.AgentTextModelPort
 import com.ai.assistance.operit.rpg.model.RpgModelConfigStore
 import com.ai.assistance.operit.rpg.ui.home.HomeScreen
+import com.ai.assistance.operit.rpg.ui.play.projectCharacterSheet
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.File
@@ -321,11 +322,16 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             loadedPages[campaign.id] = history
             val pending = history.lastOrNull { it.phase !in terminal }
             val places = listOf(public.location) + module.world.locations.filter { it.id in public.location.exits }
+            val player = public.d20Player
+            val d20Rules = module.rules.d20
+            val d20State = campaign.world.d20
+            val sheet = if (player != null && d20Rules != null && d20State != null) projectCharacterSheet(player, d20Rules, d20State, public.gameTime, module.rules.timeUnit, public.items, public.facts, public.objectives) else null
             AgentPlayUi(campaign.id, public.title, public.location.title,
                 public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", clockText(module.world.clock, public.gameTime), campaign.modelFingerprint, campaign.narratorFingerprint,
                 module.rules.contentLevels.let { levels -> if (levels.isEmpty()) null else levels[campaign.contentLevel].label + if (campaign.sceneHold) " · 将收束场景" else "" },
                 history.map(::adaptTurn), public.npcs.map { AgentPerson(it.id, it.name, if (it.status == "idle") "在场" else it.status) }, places.map { AgentPerson(it.id, it.title, it.description) },
-                public.facts.map { it.text }, public.objectives.map { "${it.title} · ${when (it.status) { "active" -> "进行中"; "complete" -> "已完成"; else -> it.status }}" }, pending == null, olderPages[campaign.id] == true)
+                public.facts.map { it.text }, public.objectives.map { "${it.title} · ${when (it.status) { "active" -> "进行中"; "complete" -> "已完成"; else -> it.status }}" }, pending == null, olderPages[campaign.id] == true,
+                player?.id, sheet)
         }
         val models = modelOptions()
         val modules = catalog.list().map(::moduleOption)
@@ -339,7 +345,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     }, if (t.phase == TurnPhase.AWAITING_CONFIRMATION) t.plan?.proposal?.publicSummary else null,
         t.error?.let { if (t.result != null) "结果已保存，叙述未完成。继续不会重新结算。" else errorText(it) },
         t.phase !in terminal && t.phase != TurnPhase.AWAITING_CONFIRMATION,
-        t.phase !in terminal && t.result == null, PublicProjection.evidence(t.result?.evidence ?: t.plan?.evidence.orEmpty()))
+        t.phase !in terminal && t.result == null, PublicProjection.evidence(t.result?.evidence ?: t.plan?.evidence.orEmpty()),
+        t.result?.rolls.orEmpty().map { RollUi(it.purpose, it.expression, it.faces, it.modifier, it.total, it.target, it.success) })
     private fun stageText(t: Turn) = when (t.phase) {
         TurnPhase.RECEIVED -> "收到行动"
         TurnPhase.GATHERING -> if (t.tools.isEmpty()) "正在理解行动" else "已核对 ${t.tools.size} 项资料，正在规划"

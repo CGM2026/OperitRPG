@@ -10,13 +10,49 @@ data class AgentModuleOption(val ref: VersionRef, val title: String, val descrip
     val characters: List<AgentCharacterOption>)
 data class AgentEntry(val ref: CampaignRef, val title: String, val updatedAt: Long)
 data class AgentPerson(val id: String, val name: String, val detail: String)
+/** One recorded d20 roll, projected for the conversation flow. */
+data class RollUi(val purpose: String, val expression: String, val faces: List<Int>, val modifier: Int,
+    val total: Int, val target: Int?, val success: Boolean?) {
+    /** 「{purpose} {total} 对 {target} · 成功/失败」; without [target] the total has nothing to compare to. */
+    val summary: String get() = buildString {
+        append(purpose); append(' '); append(total)
+        if (target != null) {
+            append(" 对 "); append(target)
+            when (success) {
+                true -> append(" · 成功")
+                false -> append(" · 失败")
+                null -> Unit
+            }
+        }
+    }
+    val detail: String get() = "骰面 ${faces.joinToString("、")} · 加值 ${if (modifier >= 0) "+$modifier" else "$modifier"} · $expression"
+}
+
+data class CharacterPoolUi(val id: String, val label: String, val current: Int, val max: Int)
+data class CharacterConditionUi(val id: String, val label: String, val remaining: String?)
+data class CharacterSlotUi(val level: Int, val current: Int, val max: Int)
+data class CharacterCounterUi(val id: String, val label: String, val current: Int, val max: Int)
+data class CharacterItemUi(val title: String, val quantity: Int)
+
+/** Read-only player sheet projected from the d20 combatant, module labels and public campaign state. */
+data class CharacterSheetUi(
+    val name: String,
+    val pools: List<CharacterPoolUi>,
+    val conditions: List<CharacterConditionUi>,
+    val slots: List<CharacterSlotUi>,
+    val counters: List<CharacterCounterUi>,
+    val items: List<CharacterItemUi>,
+    val facts: List<String>,
+    val objectives: List<String>,
+)
+
 data class AgentTurnUi(val id: String, val input: String, val narration: String, val stage: String,
     val result: String?, val confirmation: String?, val error: String?, val canResume: Boolean,
-    val canCancel: Boolean, val evidence: List<RuleEvidence>)
+    val canCancel: Boolean, val evidence: List<RuleEvidence>, val rolls: List<RollUi>)
 data class AgentPlayUi(val id: String, val title: String, val location: String, val status: String, val clock: String,
     val modelFingerprint: String, val narratorFingerprint: String, val contentLevelLabel: String?, val turns: List<AgentTurnUi>, val people: List<AgentPerson>,
     val places: List<AgentPerson>, val facts: List<String>, val objectives: List<String>,
-    val canAct: Boolean, val hasOlderTurns: Boolean)
+    val canAct: Boolean, val hasOlderTurns: Boolean, val playerCharacterId: String?, val sheet: CharacterSheetUi?)
 data class AgentDocumentUi(val id: String, val title: String)
 data class AgentImportUi(val title: String, val detail: String, val module: Boolean)
 data class AgentUiState(val entries: List<AgentEntry> = emptyList(), val modules: List<AgentModuleOption> = emptyList(),

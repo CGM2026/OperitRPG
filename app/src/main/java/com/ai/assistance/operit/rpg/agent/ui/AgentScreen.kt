@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -18,10 +19,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.ui.play.PlayScreen
 import com.ai.assistance.operit.rpg.update.RpgUpdateButton
 
 /** Receives presentation values only. GM plans and tool output never enter this screen. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentScreen(
     controller: AgentUiController,
@@ -35,14 +36,8 @@ fun AgentScreen(
     val focus = LocalFocusManager.current
     fun dismissKeyboard() { focus.clearFocus(force = true); keyboard?.hide() }
     var page by rememberSaveable { mutableStateOf(startPage) }
-    var panel by rememberSaveable { mutableStateOf<String?>(null) }
-    var input by rememberSaveable { mutableStateOf("") }
-    var selectedEvidence by remember { mutableStateOf<RuleEvidence?>(null) }
-    var correcting by remember { mutableStateOf<MemoryItem?>(null) }
-    var correction by remember { mutableStateOf("") }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(controller::previewFile) }
     val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(controller::importBackup) }
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { it?.let(controller::exportBackup) }
     val play = state.play
     LaunchedEffect(controller) { controller.refresh() }
     var baselinePlayId by remember { mutableStateOf(play?.id) }
@@ -57,26 +52,36 @@ fun AgentScreen(
         if (id != null && page == "create" && id != baselinePlayId) page = "play"
     }
     fun back() {
-        if (panel != null) panel = null
-        else if (page == "play") {
+        if (page == "play") {
             if (!state.busy) { controller.close(); onExitHome() }
         } else onExitHome()
     }
     BackHandler { back() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(when (page) { "create" -> "新的战役"; "library" -> "模组与资料"; "settings" -> "设置"; "play" -> play?.title ?: "二十面骰"; else -> "二十面骰" },
-                    style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                TextButton(onClick = { back() }) { Text("返回") }
-            }
-                state.message?.let { message -> Surface(color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
-                    Row(Modifier.padding(12.dp)) {
-                        Text(message, Modifier.weight(1f).heightIn(max = 140.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = controller::dismissMessage) { Text("关闭") }
+        Column(Modifier.fillMaxSize()) {
+            if (page == "play") {
+                AgentMessage(state.message, controller::dismissMessage)
+                if (play != null) {
+                    Box(Modifier.weight(1f)) {
+                        PlayScreen(
+                            play = play,
+                            state = state,
+                            controller = controller,
+                            onBack = ::back,
+                            onModelSettings = onModelSettings,
+                            onLibrary = { page = "library" },
+                        )
                     }
-                } }
+                } else {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(when (page) { "create" -> "新的战役"; "library" -> "模组与资料"; "settings" -> "设置"; else -> "二十面骰" },
+                        style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { back() }) { Text("返回") }
+                }
+                AgentMessage(state.message, controller::dismissMessage)
                 if (state.busy) Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Text(state.progress ?: "正在处理", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -91,116 +96,27 @@ fun AgentScreen(
                         Text("二十面骰 0.3 · 测试版", style = MaterialTheme.typography.bodySmall)
                     }
                     "library" -> AgentLibrary(state, controller, { importer.launch(arrayOf("application/zip", "application/octet-stream", "text/*")) })
-                    "create" -> AgentCreate(state, controller, { page = "library" }, onModelSettings, ::dismissKeyboard)
-                    "play" -> if (play != null) {
-                        Text("${play.location} · ${play.status}", Modifier.padding(horizontal = 28.dp), style = MaterialTheme.typography.bodySmall)
-                        Text("时辰 ${play.clock}", Modifier.padding(horizontal = 28.dp).semantics { contentDescription = "时辰" }, style = MaterialTheme.typography.bodySmall)
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            listOf("人物", "线索", "地点", "记事", "规则", "存档").forEach { name ->
-                                TextButton(onClick = { dismissKeyboard(); panel = name; if (name == "记事") controller.loadNotes() }, contentPadding = PaddingValues(4.dp)) { Text(name) }
-                            }
-                        }
-                        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                            if (play.hasOlderTurns) item { TextButton(onClick = controller::loadOlder, enabled = !state.busy) { Text("加载更早记录") } }
-                            if (play.turns.isEmpty() && state.notices.isEmpty()) item { Text("你来到了${play.location}。可以查看人物、地点与目标，然后说出你想做的事。") }
-                            items(play.turns, key = { it.id }) { turn ->
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text(turn.input, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
-                                    if (turn.narration.isNotBlank()) Text(turn.narration)
-                                    turn.result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                                    if (turn.stage.isNotBlank()) Text(turn.stage, style = MaterialTheme.typography.labelMedium)
-                                    turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                                    turn.confirmation?.let { summary ->
-                                        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
-                                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Text(summary)
-                                                Button(onClick = { controller.confirm(turn.id) }, enabled = !state.busy) { Text("确认执行") }
-                                            }
-                                        }
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        if (turn.canResume) TextButton(onClick = { controller.resume(turn.id) }, enabled = !state.busy) { Text("继续本轮") }
-                                        if (turn.canCancel) TextButton(onClick = { controller.cancel(turn.id) }, enabled = !state.busy) { Text("取消行动") }
-                                    }
-                                    turn.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("规则出处 · ${evidence.source.anchor}") } }
-                                }
-                            }
-                            items(state.notices) { notice -> Text(notice, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
-                        }
-                        if (state.models.none { it.fingerprint == play.modelFingerprint } || state.models.none { it.fingerprint == play.narratorFingerprint }) TextButton(onClick = { panel = "存档" }, Modifier.padding(horizontal = 28.dp)) { Text("请为本战役绑定本机模型") }
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(input, { input = it }, Modifier.weight(1f).semantics { contentDescription = "行动输入" }, placeholder = { Text("你想做什么？//开头为场外指令") }, maxLines = 3, enabled = !state.busy, isError = input.length > 2000)
-                            Button(onClick = { dismissKeyboard(); controller.submit(input.trim()); input = "" }, enabled = !state.busy && input.isNotBlank() && input.length <= 2000 && (input.startsWith("//") || play.canAct && state.models.any { it.fingerprint == play.modelFingerprint } && state.models.any { it.fingerprint == play.narratorFingerprint }), modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
-                        }
-                    }
+                    else -> AgentCreate(state, controller, { page = "library" }, onModelSettings, ::dismissKeyboard)
                 }
             }
-            if (panel != null && play != null) ModalBottomSheet(onDismissRequest = { panel = null },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.background) {
-                Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).padding(start = 28.dp, end = 28.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(panel!!, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { dismissKeyboard(); panel = null }, modifier = Modifier.semantics { contentDescription = "关闭${panel}面板" }) { Text("关闭") }
-                    }
-                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    when (panel) {
-                        "人物" -> { play.people.forEach { Detail(it.name, it.detail) }; if (play.people.isEmpty()) Text("当前没有已知人物。") }
-                        "线索" -> { play.facts.forEach { Text(it) }; play.objectives.forEach { Text(it) }; if (play.facts.isEmpty() && play.objectives.isEmpty()) Text("当前没有已知线索。") }
-                        "地点" -> play.places.forEach { Detail(it.name, it.detail) }
-                        "记事" -> {
-                            if (state.notes.isEmpty()) Text("还没有可见记事。")
-                            state.notes.forEach { note -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(note.text)
-                                Text(if (note.kind == "CONVERSATION") "对话回合" else "来源事件 ${note.fromSeq}–${note.toSeq}", style = MaterialTheme.typography.bodySmall)
-                                if (note.supersedesId != null) Text("已更正先前记事", style = MaterialTheme.typography.bodySmall)
-                                Row { TextButton(onClick = { controller.readNoteSource(note) }) { Text("查看来源") }; TextButton(onClick = { correcting = note; correction = note.text }) { Text("更正") } }
-                                if (note.supersedesId != null) TextButton(onClick = { controller.readCorrectionHistory(note.id) }) { Text("更正记录") }
-                            } }
-                        }
-                        "规则" -> {
-                            var query by rememberSaveable { mutableStateOf("") }
-                            OutlinedTextField(query, { query = it }, label = { Text("查询本团规则") }, modifier = Modifier.fillMaxWidth())
-                            Button(onClick = { dismissKeyboard(); controller.searchRules(query) }, enabled = !state.busy && query.isNotBlank()) { Text("查找出处") }
-                            state.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("${evidence.source.anchor} · ${authorityText(evidence.source.authority)}") } }
-                        }
-                        "存档" -> {
-                            Text("模型变更用于后续请求。规划模型与旁白模型分别绑定；已结算但叙述中断时，重绑旁白模型后可继续旁白，已保存结果保持不变。", style = MaterialTheme.typography.bodySmall)
-                            Text("规划模型", style = MaterialTheme.typography.titleMedium)
-                            state.models.forEach { model -> OutlinedButton(onClick = { controller.bindPlanner(model.id) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (model.fingerprint == play.modelFingerprint) " · 当前" else "") } }
-                            Text("旁白模型", style = MaterialTheme.typography.titleMedium)
-                            state.models.forEach { model -> OutlinedButton(onClick = { controller.bindNarrator(model.id) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (model.fingerprint == play.narratorFingerprint) " · 当前" else "") } }
-                            play.contentLevelLabel?.let { Text("当前内容分档：$it。输入 //降档 或 //升档 调整，//停 收束当前场景。", style = MaterialTheme.typography.bodySmall) }
-                            TextButton(onClick = onModelSettings) { Text("模型配置") }
-                            OutlinedButton(onClick = { exporter.launch("${play.title}.rpgsave2.zip") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出完整备份") }
-                            TextButton(onClick = { panel = null; page = "library" }) { Text("模组与资料") }
-                            Text("备份包含本团依赖模组与原文，不含 API Key。中断回合需先处理。", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                    }
-                }
-            }
-            selectedEvidence?.let { evidence -> AlertDialog(onDismissRequest = { selectedEvidence = null }, title = { Text(evidence.source.anchor) }, text = {
-                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(evidence.quote)
-                    Text("${evidence.source.sourceId.substringAfterLast('/')} · ${evidence.source.anchor}", style = MaterialTheme.typography.bodySmall)
-                    Text(authorityText(evidence.source.authority), style = MaterialTheme.typography.bodySmall)
-                }
-            }, confirmButton = { TextButton(onClick = { selectedEvidence = null }, modifier = Modifier.semantics { contentDescription = "关闭规则出处" }) { Text("关闭") } }) }
-            correcting?.let { original -> AlertDialog(onDismissRequest = { correcting = null }, title = { Text("更正记事") }, text = {
-                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("原内容：${original.text}")
-                    OutlinedTextField(correction, { correction = it }, label = { Text("新内容") }, modifier = Modifier.fillMaxWidth())
-                    Text("保留原条目与来源，更正不会修改生命、物品或骰点。", style = MaterialTheme.typography.bodySmall)
-                }
-            }, confirmButton = { TextButton(onClick = { dismissKeyboard(); controller.correctNote(original.id, correction); correcting = null }, enabled = correction.isNotBlank() && correction != original.text && !state.busy) { Text("确认更正") } }, dismissButton = { TextButton(onClick = { correcting = null }) { Text("取消") } }) }
-            state.preview?.let { preview -> AlertDialog(onDismissRequest = controller::dismissPreview, title = { Text(preview.title) }, text = { Text(preview.detail, Modifier.verticalScroll(rememberScrollState())) },
-                confirmButton = { TextButton(onClick = controller::commitImport, enabled = !state.busy) { Text(if (preview.module) "确认安装" else "保存参考资料") } }, dismissButton = { TextButton(onClick = controller::dismissPreview) { Text("取消") } }) }
-            state.documentText?.let { (title, text) -> AlertDialog(onDismissRequest = controller::dismissDocument, title = { Text(title) }, text = { Text(text, Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = controller::dismissDocument, modifier = Modifier.semantics { contentDescription = "关闭$title" }) { Text("关闭") } }) }
         }
+        state.preview?.let { preview -> AlertDialog(onDismissRequest = controller::dismissPreview, title = { Text(preview.title) }, text = { Text(preview.detail, Modifier.verticalScroll(rememberScrollState())) },
+            confirmButton = { TextButton(onClick = controller::commitImport, enabled = !state.busy) { Text(if (preview.module) "确认安装" else "保存参考资料") } }, dismissButton = { TextButton(onClick = controller::dismissPreview) { Text("取消") } }) }
+        state.documentText?.let { (title, text) -> AlertDialog(onDismissRequest = controller::dismissDocument, title = { Text(title) }, text = { Text(text, Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = controller::dismissDocument, modifier = Modifier.semantics { contentDescription = "关闭$title" }) { Text("关闭") } }) }
+    }
+}
+
+@Composable private fun AgentMessage(message: String?, onDismiss: () -> Unit) {
+    message ?: return
+    Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
+        Row(Modifier.padding(12.dp)) {
+            Text(message, Modifier.weight(1f).heightIn(max = 140.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    }
 }
 
 @Composable private fun Detail(title: String, detail: String) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(detail) } }
-private fun authorityText(value: String) = when (value) { "temporary", "house_rule" -> "本团裁定"; "module_rule" -> "模组规则"; "module_custom" -> "模组自定"; "reference" -> "参考资料"; "source" -> "资料原文"; else -> value }
 
 @Composable private fun AgentCreate(state: AgentUiState, controller: AgentUiController, onLibrary: () -> Unit, onModels: () -> Unit, dismissKeyboard: () -> Unit) {
     var title by rememberSaveable { mutableStateOf("") }
