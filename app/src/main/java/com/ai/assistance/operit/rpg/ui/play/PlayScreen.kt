@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -61,8 +62,15 @@ import com.ai.assistance.operit.rpg.agent.ui.AgentUiState
 import com.ai.assistance.operit.rpg.ui.avatar.Avatar
 import com.ai.assistance.operit.rpg.ui.avatar.AvatarCatalog
 import com.ai.assistance.operit.rpg.ui.avatar.AvatarKind
+import com.ai.assistance.operit.rpg.ui.home.ExportNames
+import com.ai.assistance.operit.rpg.ui.home.HomeFiles
 import com.ai.assistance.operit.rpg.ui.theme.NarrationFontFamily
+import java.time.LocalDate
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Reading-style play surface: narration, player bubbles, roll chips and the character sheet. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +79,7 @@ fun PlayScreen(
     play: AgentPlayUi,
     state: AgentUiState,
     controller: AgentUiController,
+    files: HomeFiles,
     onBack: () -> Unit,
     onModelSettings: () -> Unit,
     onLibrary: () -> Unit,
@@ -81,11 +90,44 @@ fun PlayScreen(
     val campaignAvatar = remember(catalog, play.id) { catalog.pick(AvatarKind.CAMPAIGN, play.id) }
     val playerCharacterId = play.playerCharacterId
     val characterAvatar = remember(catalog, playerCharacterId) { playerCharacterId?.let { catalog.pick(AvatarKind.CHARACTER, it) } }
-    val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(controller::importBackup) }
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { it?.let(controller::exportBackup) }
+    val scope = rememberCoroutineScope()
+    var backupMessage by remember { mutableStateOf<String?>(null) }
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            backupMessage = null
+            try {
+                val id = withContext(Dispatchers.IO) {
+                    val input = context.contentResolver.openInputStream(uri) ?: error("FILE_UNAVAILABLE")
+                    input.use { files.importBackup(it) }
+                }
+                menuOpen = false
+                controller.open(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                backupMessage = "导入未完成：${e.message ?: "未知错误"}"
+            }
+        }
+    }
+    val backupCreator = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) scope.launch {
+            backupMessage = null
+            try {
+                withContext(Dispatchers.IO) {
+                    val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("FILE_UNAVAILABLE")
+                    output.use { files.exportBackup(play.id, it) }
+                }
+                backupMessage = "已导出。"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                backupMessage = "导出未完成：${e.message ?: "未知错误"}"
+            }
+        }
+    }
     val listState = rememberLazyListState()
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
-    var menuOpen by rememberSaveable { mutableStateOf(false) }
     var menuPage by rememberSaveable { mutableStateOf("menu") }
     var correcting by remember { mutableStateOf<MemoryItem?>(null) }
     var correction by remember { mutableStateOf("") }
@@ -250,6 +292,12 @@ fun PlayScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("第 ${chapter.ordinal} 章 · ${chapter.title}", style = MaterialTheme.typography.titleMedium)
                                     Text(chapter.summary ?: "本章摘要尚未生成。", style = MaterialTheme.typography.bodySmall)
+                                    chapter.eventSeq?.let { seq ->
+                                        TextButton(
+                                            onClick = { menuOpen = false; controller.fork(play.id, seq) },
+                                            enabled = !state.busy,
+                                        ) { Text("从这里另开一局") }
+                                    }
                                 }
                             }
                         }
@@ -263,15 +311,16 @@ fun PlayScreen(
                         "backup" -> {
                             Text("备份包含本团依赖模组与原文，不含 API Key。中断回合需先处理。", style = MaterialTheme.typography.bodySmall)
                             OutlinedButton(
-                                onClick = { menuOpen = false; backupImporter.launch(arrayOf("application/zip", "application/octet-stream")) },
+                                onClick = { backupImporter.launch(arrayOf("application/zip", "application/octet-stream")) },
                                 enabled = !state.busy,
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("导入长团备份") }
                             OutlinedButton(
-                                onClick = { menuOpen = false; exporter.launch("${play.title}.rpgsave2.zip") },
+                                onClick = { backupCreator.launch(ExportNames.fileName(play.title, LocalDate.now(), "d20save")) },
                                 enabled = !state.busy,
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("导出完整备份") }
+                            backupMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                             play.contentLevelLabel?.let { Text("当前内容分档：$it。输入 //降档 或 //升档 调整，//停 收束当前场景。", style = MaterialTheme.typography.bodySmall) }
                         }
                         else -> {

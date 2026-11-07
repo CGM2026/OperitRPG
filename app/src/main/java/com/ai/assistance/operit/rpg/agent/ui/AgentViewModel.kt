@@ -21,16 +21,19 @@ import com.ai.assistance.operit.rpg.agent.module.ModuleZipImporter
 import com.ai.assistance.operit.rpg.agent.module.ExampleModules
 import com.ai.assistance.operit.rpg.agent.rules.Chapters
 import com.ai.assistance.operit.rpg.domain.CampaignShelf
+import com.ai.assistance.operit.rpg.export.CampaignRecap
+import com.ai.assistance.operit.rpg.export.CampaignReport
 import com.ai.assistance.operit.rpg.model.AgentTextModelPort
 import com.ai.assistance.operit.rpg.model.RpgModelConfigStore
+import com.ai.assistance.operit.rpg.ui.home.HomeFiles
 import com.ai.assistance.operit.rpg.ui.home.HomeScreen
 import com.ai.assistance.operit.rpg.ui.play.ChapterSummaries
 import com.ai.assistance.operit.rpg.ui.play.projectCharacterSheet
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import java.io.File
 import java.nio.charset.CodingErrorAction
 import java.security.SecureRandom
+import java.time.LocalDateTime
 import java.util.UUID
 
 /**
@@ -52,6 +55,7 @@ fun D20AgentRoute(
     if (screen == "home") {
         HomeScreen(
             shelf = controller.campaignShelf,
+            files = controller,
             onOpenCampaign = { id ->
                 targetCampaign = id
                 startPage = "play"
@@ -67,6 +71,7 @@ fun D20AgentRoute(
     } else {
         AgentScreen(
             controller = controller,
+            files = controller,
             onModelSettings = onModelSettings,
             startPage = startPage,
             campaignId = targetCampaign,
@@ -80,7 +85,7 @@ fun D20AgentRoute(
 }
 
 /** Keeps Android documents and jobs out of the composables. All disk work runs on IO. */
-class AgentViewModel(application: Application) : AndroidViewModel(application), AgentUiController {
+class AgentViewModel(application: Application) : AndroidViewModel(application), AgentUiController, HomeFiles {
     private val app = application
     private val db = AgentDatabase.get(app)
     val campaignShelf: CampaignShelf = RoomCampaignShelf(db)
@@ -102,7 +107,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     private var entryLimit = 50
     private var pendingModule: ValidatedModule? = null
     private var pendingDocument: Pair<String, String>? = null
-    private var pendingBackup: File? = null
     private val importer = ModuleZipImporter()
     private val exampleModules by lazy { ExampleModules.all() }
     private val random = SecureRandom()
@@ -231,41 +235,41 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         when {
             pendingModule != null -> catalog.install(requireNotNull(pendingModule))
             pendingDocument != null -> { val (title, text) = requireNotNull(pendingDocument); documents.importText(title, text, Visibility(Audience.PUBLIC)) }
-            pendingBackup != null -> requireNotNull(pendingBackup).inputStream().use { stream ->
-                val ref = backups.importBackup(stream); selectedId = ref.campaignId; loadedPages.remove(ref.campaignId); olderPages.remove(ref.campaignId); preferences.edit().putString("campaign", selectedId).apply()
-                mutable.update { it.copy(notes = emptyList(), evidence = emptyList()) }
-            }
             else -> error("IMPORT_NOT_SELECTED")
         }
         clearPending(); mutable.update { it.copy(preview = null, message = "已保存。") }
     }
     override fun dismissPreview() { clearPending(); mutable.update { it.copy(preview = null) } }
-    private fun clearPending() { pendingModule = null; pendingDocument = null; pendingBackup?.delete(); pendingBackup = null }
-    override fun importBackup(uri: Uri) = execute("校验长团备份") {
-        clearPending()
-        val file = File.createTempFile("agent-backup-", ".zip", app.cacheDir)
-        try {
-            requireNotNull(app.contentResolver.openInputStream(uri)).use { input -> file.outputStream().use { output ->
-                val buffer = ByteArray(8192); var count = 0L
-                while (true) { currentCoroutineContext().ensureActive(); val n = input.read(buffer); if (n < 0) break; count += n; require(count <= 100L * 1024 * 1024) { "BACKUP_TOO_LARGE" }; output.write(buffer, 0, n) }
-            } }
-            val title = file.inputStream().use { backups.preview(it).title }
-            pendingBackup = file
-            mutable.update { it.copy(preview = AgentImportUi(title, "导入为独立长团战役，恢复模组、事件与记事；导入后需重新绑定本机模型。", true)) }
-        } catch (e: Exception) { file.delete(); throw e }
+    private fun clearPending() { pendingModule = null; pendingDocument = null }
+    override fun importBackup(input: java.io.InputStream): String = backups.importBackup(input).campaignId
+    override fun exportBackup(campaignId: String, output: java.io.OutputStream) = backups.export(campaignId, output)
+    override fun exportReport(campaignId: String, output: java.io.OutputStream) {
+        val campaign = requireNotNull(store.loadCampaign(campaignId)) { "CAMPAIGN_NOT_FOUND" }
+        val module = catalog.get(campaign.module)
+        val text = CampaignReport.markdown(
+            campaign,
+            module,
+            characterName(campaign, module),
+            allTurns(campaign.id),
+            allEvents(campaign.id),
+            allMemories(campaign.id),
+            LocalDateTime.now(),
+        )
+        output.write(text.toByteArray(Charsets.UTF_8))
     }
-    override fun exportBackup(uri: Uri) = execute("准备一致备份，暂时暂停本团写入") {
-        val c = current()
-        val job = currentCoroutineContext().job
-        requireNotNull(app.contentResolver.openOutputStream(uri, "wt")).use { target ->
-            val output = object : java.io.OutputStream() {
-                override fun write(value: Int) { job.ensureActive(); target.write(value) }
-                override fun write(bytes: ByteArray, offset: Int, length: Int) { job.ensureActive(); target.write(bytes, offset, length) }
-                override fun flush() = target.flush()
-            }
-            backups.export(c.id, output)
-        }
-        message("完整备份已导出。")
+    override fun exportRecap(campaignId: String, output: java.io.OutputStream) {
+        val campaign = requireNotNull(store.loadCampaign(campaignId)) { "CAMPAIGN_NOT_FOUND" }
+        val module = catalog.get(campaign.module)
+        val initial = decode<WorldState>(db.dao().initial(campaignId).joinToString("") { it.text })
+        val text = CampaignRecap.markdown(campaign, module, initial, allEvents(campaignId), LocalDateTime.now())
+        output.write(text.toByteArray(Charsets.UTF_8))
+    }
+    override fun fork(campaignId: String, uptoSeq: Long) = execute("从章节另开一局") {
+        val ref = backups.fork(campaignId, uptoSeq)
+        mutable.update { it.copy(forkResult = ref.campaignId) }
+    }
+    override fun consumeForkResult() {
+        mutable.update { it.copy(forkResult = null) }
     }
     override fun searchRules(query: String) = execute("查阅规则") {
         val c = current(); val found = rules.search(RoleContext(c.id, Audience.PUBLIC), c.module, query, 5)
@@ -334,8 +338,16 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             val sheet = if (player != null && d20Rules != null && d20State != null) projectCharacterSheet(player, d20Rules, d20State, public.gameTime, module.rules.timeUnit, public.items, public.facts, public.objectives) else null
             val summaryItems = memories.list(RoleContext(campaign.id, Audience.PUBLIC), null, 500).filter { it.kind == Chapters.SUMMARY_KIND && it.status == "ACTIVE" }
             val currentOrdinal = module.rules.chapters.indexOfFirst { it.id == campaign.chapterId } + 1
+            val firstChapterSeq = if (campaign.lastEventSeq >= 1) 1L else null
+            val chapterSeqs = chapterEventSeqs(campaign.id)
             val archive = module.rules.chapters.take(currentOrdinal).mapIndexed { index, chapter ->
-                AgentChapterUi(chapter.id, chapter.title, index + 1, summaryItems.lastOrNull { it.entityIds.contains(chapter.id) }?.text)
+                AgentChapterUi(
+                    chapter.id,
+                    chapter.title,
+                    index + 1,
+                    summaryItems.lastOrNull { it.entityIds.contains(chapter.id) }?.text,
+                    if (index == 0) firstChapterSeq else chapterSeqs[chapter.id],
+                )
             }
             history.lastOrNull { it.result?.chapters?.isNotEmpty() == true }?.let { turn -> advancing = Triple(campaign, module, turn) }
             AgentPlayUi(campaign.id, public.title, public.location.title,
@@ -478,6 +490,53 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         e.message?.matches(Regex("[A-Z_0-9:. /-]{3,160}")) == true -> "操作未完成：${e.message}"
         e is IllegalArgumentException -> "资料字段或格式不符合要求，请检查后重新校验。"
         else -> "操作未完成，请检查配置与资料后重试。"
+    }
+    private fun characterName(campaign: Campaign, module: ValidatedModule): String {
+        val player = PublicProjection.campaign(campaign, module).d20Player
+        return if (player == null) module.world.characters.first().name else player.name
+    }
+    private fun allTurns(campaignId: String): List<Turn> {
+        val out = mutableListOf<Turn>(); var before: Long? = null
+        while (true) {
+            val rows = store.history(campaignId, before, 200)
+            if (rows.isEmpty()) break
+            out += rows
+            before = rows.last().ordinal
+        }
+        return out.sortedBy { it.ordinal }
+    }
+    private fun allEvents(campaignId: String): List<WorldEvent> {
+        val out = mutableListOf<WorldEvent>(); var after = 0L
+        while (true) {
+            val rows = store.events(campaignId, after, 200)
+            if (rows.isEmpty()) break
+            out += rows
+            after = rows.last().seq
+        }
+        return out
+    }
+    private fun chapterEventSeqs(campaignId: String): Map<String, Long> {
+        val out = mutableMapOf<String, Long>()
+        allEvents(campaignId).forEach { event ->
+            event.chapters.forEach { mark -> out.putIfAbsent(mark.chapterId, event.seq) }
+        }
+        return out
+    }
+    private fun allMemories(campaignId: String): List<MemoryItem> {
+        val out = mutableListOf<MemoryItem>(); var after = ""
+        while (true) {
+            val rows = db.dao().exportMemory(campaignId, after, 200)
+            if (rows.isEmpty()) break
+            rows.forEach { row ->
+                out += MemoryItem(
+                    row.id, row.campaignId, row.text, decode(row.entitiesJson), row.fromSeq, row.toSeq,
+                    Visibility(Audience.valueOf(row.audience), row.subjectId), row.status,
+                    row.supersedesId, row.sourceTurnId, row.kind,
+                )
+            }
+            after = rows.last().id
+        }
+        return out
     }
     private fun message(text: String) { mutable.update { it.copy(message = text) } }
     private fun fileName(uri: Uri): String = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->

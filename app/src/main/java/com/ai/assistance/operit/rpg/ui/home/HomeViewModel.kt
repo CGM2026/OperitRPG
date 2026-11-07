@@ -1,11 +1,14 @@
 package com.ai.assistance.operit.rpg.ui.home
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.rpg.domain.CampaignShelf
 import com.ai.assistance.operit.rpg.domain.Shelf
 import com.ai.assistance.operit.rpg.domain.ShelfCampaign
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,7 +30,10 @@ data class HomeUiState(
     val sections: List<HomeSection> = emptyList(),
     val query: String = "",
     val loading: Boolean = true,
+    val message: String? = null,
 )
+
+enum class ExportKind { BACKUP, REPORT, RECAP }
 
 /**
  * Pinned campaigns first, then groups ordered by sortKey, then ungrouped campaigns.
@@ -58,7 +64,11 @@ fun buildSections(shelf: Shelf, query: String): List<HomeSection> {
     return sections
 }
 
-class HomeViewModel(private val shelf: CampaignShelf) : ViewModel() {
+class HomeViewModel(
+    private val shelf: CampaignShelf,
+    private val files: HomeFiles,
+    private val contentResolver: ContentResolver,
+) : ViewModel() {
     private val mutable = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = mutable.asStateFlow()
     private var loaded = Shelf(emptyList(), emptyList())
@@ -92,6 +102,9 @@ class HomeViewModel(private val shelf: CampaignShelf) : ViewModel() {
 
     fun setPinned(campaignId: String, pinned: Boolean) = mutate { it.setPinned(campaignId, pinned) }
 
+    fun setFinished(campaignId: String, finished: Boolean) =
+        mutate { it.setFinished(campaignId, finished) }
+
     fun setHidden(campaignId: String, hidden: Boolean) = mutate { it.setHidden(campaignId, hidden) }
 
     fun rename(campaignId: String, title: String) = mutate { it.rename(campaignId, title) }
@@ -101,10 +114,44 @@ class HomeViewModel(private val shelf: CampaignShelf) : ViewModel() {
 
     fun delete(campaignId: String) = mutate { it.delete(campaignId) }
 
+    fun export(campaignId: String, uri: Uri, kind: ExportKind) = fileOperation("已导出。") {
+        val output = contentResolver.openOutputStream(uri, "wt") ?: error("FILE_UNAVAILABLE")
+        output.use { stream ->
+            when (kind) {
+                ExportKind.BACKUP -> files.exportBackup(campaignId, stream)
+                ExportKind.REPORT -> files.exportReport(campaignId, stream)
+                ExportKind.RECAP -> files.exportRecap(campaignId, stream)
+            }
+        }
+    }
+
+    fun importBackup(uri: Uri) = fileOperation("已导入备份。") {
+        val input = contentResolver.openInputStream(uri) ?: error("FILE_UNAVAILABLE")
+        input.use { files.importBackup(it) }
+    }
+
+    fun dismissMessage() {
+        mutable.update { it.copy(message = null) }
+    }
+
     private fun mutate(block: (CampaignShelf) -> Unit) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { block(shelf) }
             reload()
+        }
+    }
+
+    private fun fileOperation(success: String, block: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { block() }
+                mutable.update { it.copy(message = success) }
+                reload()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                mutable.update { it.copy(message = "文件操作未完成：${e.message ?: "未知错误"}") }
+            }
         }
     }
 
@@ -117,7 +164,12 @@ class HomeViewModel(private val shelf: CampaignShelf) : ViewModel() {
     }
 }
 
-class HomeViewModelFactory(private val shelf: CampaignShelf) : ViewModelProvider.Factory {
+class HomeViewModelFactory(
+    private val shelf: CampaignShelf,
+    private val files: HomeFiles,
+    private val contentResolver: ContentResolver,
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = HomeViewModel(shelf) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        HomeViewModel(shelf, files, contentResolver) as T
 }

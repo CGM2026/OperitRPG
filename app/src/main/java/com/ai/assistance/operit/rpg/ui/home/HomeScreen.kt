@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.rpg.ui.home
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -53,6 +55,7 @@ import com.ai.assistance.operit.rpg.ui.avatar.AvatarCatalog
 import com.ai.assistance.operit.rpg.ui.avatar.AvatarKind
 import com.ai.assistance.operit.rpg.ui.avatar.AvatarSpec
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -61,17 +64,52 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun HomeScreen(
     shelf: CampaignShelf,
+    files: HomeFiles,
     onOpenCampaign: (String) -> Unit,
     onNewCampaign: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    val controller: HomeViewModel = viewModel(factory = remember(shelf) { HomeViewModelFactory(shelf) })
-    val state by controller.state.collectAsState()
     val context = LocalContext.current
+    val controller: HomeViewModel = viewModel(
+        factory = remember(shelf, files, context) {
+            HomeViewModelFactory(shelf, files, context.contentResolver)
+        },
+    )
+    val state by controller.state.collectAsState()
     val catalog = remember(context) { AvatarCatalog.load(context) }
     var search by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var campaignMenu by remember { mutableStateOf<ShelfCampaign?>(null) }
+    var campaignMenuPage by remember { mutableStateOf("menu") }
+    var plusMenu by remember { mutableStateOf(false) }
+    var pendingExport by remember { mutableStateOf<Pair<ShelfCampaign, ExportKind>?>(null) }
+    var recapConfirm by remember { mutableStateOf<ShelfCampaign?>(null) }
+    val backupCreator = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val pending = pendingExport
+        pendingExport = null
+        if (uri != null && pending != null && pending.second == ExportKind.BACKUP) {
+            controller.export(pending.first.campaignId, uri, ExportKind.BACKUP)
+        }
+    }
+    val markdownCreator = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
+        val pending = pendingExport
+        pendingExport = null
+        if (uri != null && pending != null && pending.second != ExportKind.BACKUP) {
+            controller.export(pending.first.campaignId, uri, pending.second)
+        }
+    }
+    val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) controller.importBackup(uri)
+    }
+    fun launchExport(campaign: ShelfCampaign, kind: ExportKind) {
+        pendingExport = campaign to kind
+        val name = ExportNames.fileName(
+            campaign.title,
+            LocalDate.now(),
+            if (kind == ExportKind.BACKUP) "d20save" else "md",
+        )
+        if (kind == ExportKind.BACKUP) backupCreator.launch(name) else markdownCreator.launch(name)
+    }
     var groupMenu by remember { mutableStateOf<HomeSection?>(null) }
     var renameCampaign by remember { mutableStateOf<ShelfCampaign?>(null) }
     var renameCampaignText by remember { mutableStateOf("") }
@@ -116,7 +154,7 @@ fun HomeScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewCampaign) {
+            FloatingActionButton(onClick = { plusMenu = true }) {
                 Text("+", style = MaterialTheme.typography.titleLarge)
             }
         },
@@ -126,6 +164,17 @@ fun HomeScreen(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            state.message?.let { message ->
+                item(key = "message") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = controller::dismissMessage) { Text("关闭") }
+                    }
+                }
+            }
             state.sections.forEach { section ->
                 item(key = "section:${section.key}") {
                     SectionHeader(
@@ -143,7 +192,10 @@ fun HomeScreen(
                             campaign = campaign,
                             avatar = campaignAvatar(catalog, campaign),
                             onClick = { onOpenCampaign(campaign.campaignId) },
-                            onLongPress = { campaignMenu = campaign },
+                            onLongPress = {
+                                campaignMenuPage = "menu"
+                                campaignMenu = campaign
+                            },
                         )
                     }
                 }
@@ -156,7 +208,10 @@ fun HomeScreen(
 
     campaignMenu?.let { campaign ->
         ModalBottomSheet(
-            onDismissRequest = { campaignMenu = null },
+            onDismissRequest = {
+                campaignMenu = null
+                campaignMenuPage = "menu"
+            },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             Column(
@@ -173,53 +228,116 @@ fun HomeScreen(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                SheetAction(if (campaign.pinned) "取消置顶" else "置顶") {
-                    controller.setPinned(campaign.campaignId, !campaign.pinned)
-                    campaignMenu = null
-                }
-                SheetAction("重命名") {
-                    renameCampaign = campaign
-                    renameCampaignText = campaign.title
-                    campaignMenu = null
-                }
-                Text(
-                    "移动到分组",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-                )
-                state.sections.filter { it.groupId != null }.forEach { group ->
-                    SheetAction(group.title + if (campaign.groupId == group.groupId) " · 当前" else "") {
-                        controller.moveToGroup(campaign.campaignId, group.groupId)
+                if (campaignMenuPage == "export") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { campaignMenuPage = "menu" }) { Text("返回") }
+                        Text("导出", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    }
+                    SheetAction("备份（.d20save）") {
+                        campaignMenu = null
+                        launchExport(campaign, ExportKind.BACKUP)
+                    }
+                    SheetAction("战报（.md）") {
+                        campaignMenu = null
+                        launchExport(campaign, ExportKind.REPORT)
+                    }
+                    if (campaign.finished) {
+                        SheetAction("主持复盘（.md）") {
+                            campaignMenu = null
+                            recapConfirm = campaign
+                        }
+                    }
+                } else {
+                    SheetAction(if (campaign.pinned) "取消置顶" else "置顶") {
+                        controller.setPinned(campaign.campaignId, !campaign.pinned)
                         campaignMenu = null
                     }
-                }
-                SheetAction("新建分组") {
-                    newGroupText = ""
-                    newGroupFor = campaign.campaignId
-                    newGroupOpen = true
-                    campaignMenu = null
-                }
-                if (campaign.groupId != null) {
-                    SheetAction("移出分组") {
-                        controller.moveToGroup(campaign.campaignId, null)
+                    SheetAction("重命名") {
+                        renameCampaign = campaign
+                        renameCampaignText = campaign.title
                         campaignMenu = null
                     }
-                }
-                SheetAction("换头像") {
-                    avatarCampaign = campaign
-                    campaignMenu = null
-                }
-                SheetAction("隐藏") {
-                    controller.setHidden(campaign.campaignId, true)
-                    campaignMenu = null
-                }
-                SheetAction("删除") {
-                    deleteCampaign = campaign
-                    campaignMenu = null
+                    SheetAction(if (campaign.finished) "取消完结" else "标记完结") {
+                        controller.setFinished(campaign.campaignId, !campaign.finished)
+                        campaignMenu = null
+                    }
+                    SheetAction("导出") { campaignMenuPage = "export" }
+                    Text(
+                        "移动到分组",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                    )
+                    state.sections.filter { it.groupId != null }.forEach { group ->
+                        SheetAction(group.title + if (campaign.groupId == group.groupId) " · 当前" else "") {
+                            controller.moveToGroup(campaign.campaignId, group.groupId)
+                            campaignMenu = null
+                        }
+                    }
+                    SheetAction("新建分组") {
+                        newGroupText = ""
+                        newGroupFor = campaign.campaignId
+                        newGroupOpen = true
+                        campaignMenu = null
+                    }
+                    if (campaign.groupId != null) {
+                        SheetAction("移出分组") {
+                            controller.moveToGroup(campaign.campaignId, null)
+                            campaignMenu = null
+                        }
+                    }
+                    SheetAction("换头像") {
+                        avatarCampaign = campaign
+                        campaignMenu = null
+                    }
+                    SheetAction("隐藏") {
+                        controller.setHidden(campaign.campaignId, true)
+                        campaignMenu = null
+                    }
+                    SheetAction("删除") {
+                        deleteCampaign = campaign
+                        campaignMenu = null
+                    }
                 }
             }
         }
+    }
+
+    if (plusMenu) {
+        ModalBottomSheet(
+            onDismissRequest = { plusMenu = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+            ) {
+                SheetAction("新建战役") {
+                    plusMenu = false
+                    onNewCampaign()
+                }
+                SheetAction("导入备份") {
+                    plusMenu = false
+                    backupImporter.launch(arrayOf("*/*"))
+                }
+            }
+        }
+    }
+
+    recapConfirm?.let { campaign ->
+        AlertDialog(
+            onDismissRequest = { recapConfirm = null },
+            title = { Text("导出主持复盘") },
+            text = { Text("复盘包含全部隐藏设定与幕后事件，导出后无法撤回剧透。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    recapConfirm = null
+                    launchExport(campaign, ExportKind.RECAP)
+                }) { Text("确认导出") }
+            },
+            dismissButton = { TextButton(onClick = { recapConfirm = null }) { Text("取消") } },
+        )
     }
 
     groupMenu?.let { section ->
@@ -443,7 +561,7 @@ private fun CampaignRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    campaign.subtitle,
+                    campaign.subtitle + if (campaign.finished) " · 已完结" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

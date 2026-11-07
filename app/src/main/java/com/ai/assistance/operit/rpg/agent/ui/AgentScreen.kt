@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.ui.home.HomeFiles
 import com.ai.assistance.operit.rpg.ui.play.PlayScreen
 import com.ai.assistance.operit.rpg.update.RpgUpdateButton
 
@@ -26,6 +27,7 @@ import com.ai.assistance.operit.rpg.update.RpgUpdateButton
 @Composable
 fun AgentScreen(
     controller: AgentUiController,
+    files: HomeFiles,
     onModelSettings: () -> Unit,
     startPage: String,
     campaignId: String?,
@@ -37,9 +39,14 @@ fun AgentScreen(
     fun dismissKeyboard() { focus.clearFocus(force = true); keyboard?.hide() }
     var page by rememberSaveable { mutableStateOf(startPage) }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(controller::previewFile) }
-    val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(controller::importBackup) }
     val play = state.play
     LaunchedEffect(controller) { controller.refresh() }
+    LaunchedEffect(state.forkResult) {
+        if (state.forkResult != null) {
+            controller.consumeForkResult()
+            onExitHome()
+        }
+    }
     var baselinePlayId by remember { mutableStateOf(play?.id) }
     LaunchedEffect(campaignId) {
         if (campaignId != null) {
@@ -67,6 +74,7 @@ fun AgentScreen(
                             play = play,
                             state = state,
                             controller = controller,
+                            files = files,
                             onBack = ::back,
                             onModelSettings = onModelSettings,
                             onLibrary = { page = "library" },
@@ -91,7 +99,6 @@ fun AgentScreen(
                     "settings" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         OutlinedButton(onClick = { page = "library" }, Modifier.fillMaxWidth()) { Text("模组与资料") }
                         OutlinedButton(onClick = onModelSettings, Modifier.fillMaxWidth()) { Text("模型配置") }
-                        OutlinedButton(onClick = { backupImporter.launch(arrayOf("application/zip", "application/octet-stream")) }, Modifier.fillMaxWidth(), enabled = !state.busy) { Text("导入长团备份") }
                         RpgUpdateButton(Modifier.fillMaxWidth())
                         Text("二十面骰 0.3 · 测试版", style = MaterialTheme.typography.bodySmall)
                     }

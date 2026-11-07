@@ -50,8 +50,8 @@ data class AgentTurnUi(val id: String, val input: String, val narration: String,
     val result: String?, val confirmation: String?, val error: String?, val canResume: Boolean,
     val canCancel: Boolean, val evidence: List<RuleEvidence>, val rolls: List<RollUi>,
     val chapters: List<ChapterMark> = emptyList())
-/** One reached chapter and the generated recap; the current chapter has no summary until play leaves it. */
-data class AgentChapterUi(val id: String, val title: String, val ordinal: Int, val summary: String?)
+/** One reached chapter, the event that entered it (null before any event), and its generated recap. */
+data class AgentChapterUi(val id: String, val title: String, val ordinal: Int, val summary: String?, val eventSeq: Long?)
 data class AgentPlayUi(val id: String, val title: String, val location: String, val status: String, val clock: String,
     val modelFingerprint: String, val narratorFingerprint: String, val contentLevelLabel: String?, val turns: List<AgentTurnUi>, val people: List<AgentPerson>,
     val places: List<AgentPerson>, val facts: List<String>, val objectives: List<String>,
@@ -69,7 +69,9 @@ data class AgentUiState(val entries: List<AgentEntry> = emptyList(), val modules
     /** Local replies to `//` table commands; shown in the conversation flow, never stored in the event stream. */
     val notices: List<String> = emptyList(),
     /** Chapter-summary failures keyed by the turn that entered the new chapter; retried only on explicit user action. */
-    val chapterSummaryErrors: Map<String, String> = emptyMap())
+    val chapterSummaryErrors: Map<String, String> = emptyMap(),
+    /** Set after a chapter fork succeeds; the play shell leaves for the refreshed home shelf. */
+    val forkResult: String? = null)
 
 interface AgentUiController {
     val state: StateFlow<AgentUiState>
@@ -90,8 +92,8 @@ interface AgentUiController {
     fun previewExample(hash: String)
     fun commitImport()
     fun dismissPreview()
-    fun importBackup(uri: Uri)
-    fun exportBackup(uri: Uri)
+    fun fork(campaignId: String, uptoSeq: Long)
+    fun consumeForkResult()
     fun searchRules(query: String)
     fun loadNotes()
     fun correctNote(id: String, text: String)
