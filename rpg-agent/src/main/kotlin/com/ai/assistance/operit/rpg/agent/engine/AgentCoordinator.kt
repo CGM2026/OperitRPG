@@ -15,7 +15,7 @@ class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCa
     fun create(id:String,title:String,moduleRef:VersionRef,characterId:String,allowGeneration:Boolean,modelFingerprint:String,narratorFingerprint:String):Campaign {
         val m=catalog.get(moduleRef); RuleAdapters.forModule(m).validateModule(m)
         require(m.contentHash==moduleRef.hash && modelFingerprint.isNotBlank() && narratorFingerprint.isNotBlank())
-        val c=Campaign(id,title,moduleRef,VersionRef(m.rules.adapterId,m.rules.adapterVersion,m.contentHash),0,0,initialWorld(m,characterId),allowGeneration,modelFingerprint,narratorFingerprint,clock.nowMillis(),contentLevel=m.rules.defaultContentLevel)
+        val c=Campaign(id,title,moduleRef,VersionRef(m.rules.adapterId,m.rules.adapterVersion,m.contentHash),0,0,initialWorld(m,characterId),allowGeneration,modelFingerprint,narratorFingerprint,clock.nowMillis(),contentLevel=m.rules.defaultContentLevel,chapterId=Chapters.initialId(m.rules))
         store.createCampaign(c); return c
     }
     suspend fun submit(campaignId:String,clientMessageId:String,text:String):Turn {
@@ -132,9 +132,11 @@ class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCa
         val plan=requireNotNull(t.plan); require(freeze(c,plan.proposal,plan.evidence).planHash==plan.planHash) { "STALE_PROPOSAL" }
         val m=catalog.get(c.module); val adapter=RuleAdapters.forModule(m); val (event,result)=adapter.resolve(c,plan,m,turnId,dice)
         val world=adapter.applyRecordedEvent(c.world,event,m)
-        tx.appendEvent(event)
-        tx.saveCampaign(c.copy(world=world,revision=c.revision+1,lastEventSeq=event.seq,updatedAt=clock.nowMillis()))
-        t.copy(phase=TurnPhase.COMMITTED,result=result).also { tx.saveTurn(it) }
+        val chapter=Chapters.advance(c,world,m.rules)
+        val recordedEvent=event.copy(chapters=chapter.marks)
+        tx.appendEvent(recordedEvent)
+        tx.saveCampaign(c.copy(world=world,revision=c.revision+1,lastEventSeq=recordedEvent.seq,chapterId=chapter.chapterId,updatedAt=clock.nowMillis()))
+        t.copy(phase=TurnPhase.COMMITTED,result=result.copy(chapters=chapter.marks)).also { tx.saveTurn(it) }
     }
     private suspend fun narrate(campaignId:String,turnId:String):Turn {
         try {

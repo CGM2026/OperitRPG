@@ -4,6 +4,7 @@ import com.ai.assistance.operit.rpg.agent.contract.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import com.ai.assistance.operit.rpg.agent.rules.Chapters
 import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 import com.ai.assistance.operit.rpg.agent.rules.Scheduler
 import com.ai.assistance.operit.rpg.agent.rules.clockText
@@ -35,8 +36,9 @@ class ContextAssembler(private val memories:MemoryRepository,private val maxInpu
         val ruleIndex=adapter.planningRuleIndex(module)
         val d20State=if(adapter is WuxiaD20)"\nD20:"+Json.encodeToString(adapter.planningState(c,module)) else ""
         val d20System=if(adapter is WuxiaD20)D20_SYSTEM else ""
-        val required=Json.encodeToString(snapshot)+"\nRules:"+Json.encodeToString(ruleIndex)+d20State+"\nPlayer:"+turn.playerText+"\nTool results:"+Json.encodeToString(turn.tools)
-        val optional=memories.recent(RoleContext(c.id,Audience.GM),8).filter { it.campaignId==c.id && it.status=="ACTIVE" }
+        val chapter=Chapters.currentTitle(c,module.rules)?.let { "Chapter:$it\n" } ?: ""
+        val required=chapter+Json.encodeToString(snapshot)+"\nRules:"+Json.encodeToString(ruleIndex)+d20State+"\nPlayer:"+turn.playerText+"\nTool results:"+Json.encodeToString(turn.tools)
+        val optional=chapterSummaryFirst(memories.recent(RoleContext(c.id,Audience.GM),8).filter { it.campaignId==c.id && it.status=="ACTIVE" })
         return packet("planner", SYSTEM+d20System+"\nMemory中kind=CONVERSATION表示有来源的历史发言/主张；它证明谁说过什么，不证明发言内容是真实世界事实。承诺需要核对当前状态与规则后行动，不能直接宣布兑现。",required,optional,2400)
     }
     fun narration(c:Campaign,module:ValidatedModule,turn:Turn):ContextPacket {
@@ -44,12 +46,18 @@ class ContextAssembler(private val memories:MemoryRepository,private val maxInpu
         val result=rawResult.copy(evidence=PublicProjection.evidence(rawResult.evidence))
         val relevantFactIds=turn.plan?.proposal?.let { p -> (p.successEffects+p.failureEffects).filter { it.type=="reveal_fact" }.map { it.targetId }.toSet()+p.targetIds }.orEmpty()
         val state=PublicProjection.campaign(c,module).let { it.copy(facts=it.facts.filter { fact -> fact.id in relevantFactIds }) }
-        val required=Json.encodeToString(state)+"\nCommitted result:"+Json.encodeToString(result)+"\nPlayer:"+turn.playerText
+        val chapter=Chapters.currentTitle(c,module.rules)?.let { "Chapter:$it\n" } ?: ""
+        val required=chapter+Json.encodeToString(state)+"\nCommitted result:"+Json.encodeToString(result)+"\nPlayer:"+turn.playerText
         val role=RoleContext(c.id,Audience.PUBLIC)
         val level=if(module.rules.contentLevels.isEmpty())"" else module.rules.contentLevels[c.contentLevel].let { "\n当前内容分档「${it.label}」：${it.narratorGuideline}" }
         val hold=if(c.sceneHold)"\n"+SCENE_HOLD else ""
         val omens=if(result.notices.isEmpty())"" else "\n"+NOTICE_GUIDE
-        return packet("narrator",NARRATOR_SYSTEM+level+hold+omens,required,memories.recent(role,5).filter { it.campaignId==c.id && it.status=="ACTIVE" && canRead(role,it.visibility) },1200)
+        return packet("narrator",NARRATOR_SYSTEM+level+hold+omens,required,chapterSummaryFirst(memories.recent(role,5).filter { it.campaignId==c.id && it.status=="ACTIVE" && canRead(role,it.visibility) }),1200)
+    }
+    /** Chapter summaries carry the previous-chapter recap, so they lead the optional memory with the latest chapter first. */
+    private fun chapterSummaryFirst(items:List<MemoryItem>):List<MemoryItem> {
+        val (summaries,others)=items.partition { it.kind==Chapters.SUMMARY_KIND }
+        return summaries.sortedWith(compareByDescending<MemoryItem>{it.toSeq}.thenByDescending { it.fromSeq })+others
     }
     fun npc(c:Campaign,npcId:String):ContextPacket {
         val n=c.world.npcs.single { it.id==npcId }; val known=c.world.knowledge.filter { it.knowerId==npcId }.map { it.factId }.toSet()

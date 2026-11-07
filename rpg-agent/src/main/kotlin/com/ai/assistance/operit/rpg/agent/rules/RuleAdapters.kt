@@ -12,6 +12,15 @@ fun validateContentLevels(rules: ModuleRules) {
     require(rules.defaultContentLevel in rules.contentLevels.indices) { "INVALID_CONTENT_LEVEL" }
 }
 
+/** Chapter declarations are optional; when present the first chapter always opens the campaign and every later chapter must gate itself. */
+fun validateChapters(rules: ModuleRules, world: WorldState, module: ValidatedModule) {
+    if (rules.chapters.isEmpty()) return
+    require(rules.chapters.map { it.id }.distinct().size == rules.chapters.size && rules.chapters.all { it.id.isNotBlank() && it.title.isNotBlank() }) { "INVALID_CHAPTER" }
+    require(rules.chapters.first().enterWhen.isEmpty() && rules.chapters.drop(1).all { it.enterWhen.isNotEmpty() }) { "INVALID_CHAPTER" }
+    val generic = GenericD100()
+    rules.chapters.forEach { chapter -> chapter.enterWhen.forEach { generic.validateCondition(it, world, module) } }
+}
+
 object RuleAdapters {
     fun forRules(adapterId: String, adapterVersion: String): RuleAdapter = when {
         adapterId == "generic-d100-v1" && adapterVersion == "1" -> GenericD100()

@@ -114,6 +114,7 @@ class WuxiaD20 : RuleAdapter {
             val rolls = if (check == null) emptyList() else listOf(D20Action("check", w.characters.first().id, skill = check.skill, dcTier = check.dcTier))
             validateProposal(local, module, ActionProposal(a.actionType, a.targetIds, a.skill, a.difficulty, listOf(a.ruleId), a.conditions, a.successEffects, a.failureEffects, publicSummary = a.title, d20 = rolls), r.evidence)
         }
+        validateChapters(r, campaign.world, module)
         Scheduler.validateModule(module, campaign.world)
         validateState(campaign.world, module)
     }

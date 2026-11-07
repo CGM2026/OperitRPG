@@ -58,6 +58,7 @@ class GenericD100 : RuleAdapter {
             val local=campaign.copy(world=campaign.world.copy(locationId=actionLocation))
             validateProposal(local,module,ActionProposal(a.actionType,a.targetIds,a.skill,a.difficulty,listOf(a.ruleId),a.conditions,a.successEffects,a.failureEffects,publicSummary=a.title),r.evidence)
         }
+        validateChapters(r,campaign.world,module)
         Scheduler.validateModule(module,campaign.world)
         validateState(campaign.world,module)
     }
