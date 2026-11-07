@@ -304,11 +304,12 @@ private fun TurnBlock(turn: AgentTurnUi, busy: Boolean, isLast: Boolean, control
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (turn.input.isNotBlank()) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val bubbleMax = this.maxWidth * 0.8f
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.widthIn(max = maxWidth * 0.8f),
+                        modifier = Modifier.widthIn(max = bubbleMax),
                     ) {
                         Text(turn.input, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
                     }
