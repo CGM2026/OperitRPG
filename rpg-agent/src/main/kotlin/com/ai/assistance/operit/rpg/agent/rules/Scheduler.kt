@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.rpg.agent.rules
 
+import com.ai.assistance.operit.rpg.agent.memory.UpcomingSchedule
 import com.ai.assistance.operit.rpg.agent.contract.*
 
 /** Display time for the 时辰 row and the narrator. Without a clock spec the plain minute count is shown. */
