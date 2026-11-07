@@ -20,7 +20,7 @@ class AgentTextModelPortTest {
             server.enqueue(MockResponse().setBody("""{"choices":[{"finish_reason":"stop","message":{"content":"{\"kind\":\"answer\"}"}}],"usage":{"prompt_tokens":12,"completion_tokens":3}}"""))
             val transcript = """{"campaign":"selected","tools":[{"name":"query_rules","output":"百分骰"}],"privateGMContext":"局部私密事实"}"""
             val reply = port.generate("one", ContextPacket("planner", "主持人限定工具", transcript, 1900))
-            assertEquals(Usage(12,3), reply.usage)
+            assertEquals(com.ai.assistance.operit.rpg.agent.contract.Usage(12,3), reply.usage)
             val sent = server.takeRequest(2, TimeUnit.SECONDS)!!
             val body = Json.parseToJsonElement(sent.body.readUtf8()).jsonObject
             assertEquals(transcript, body.getValue("messages").jsonArray.last().jsonObject.getValue("content").jsonPrimitive.content)
