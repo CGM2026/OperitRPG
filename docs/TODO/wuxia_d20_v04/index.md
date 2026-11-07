@@ -24,7 +24,7 @@ status: 设计中，里程碑 1
 1. [适配器注册与通用骰源](01-adapter-registry-and-dice.md)
 2. [wuxia-d20-v1 数据模型与结算](02-wuxia-d20-adapter.md)
 3. [规划与旁白分离模型、场外指令](03-model-split-and-table-commands.md)
-4. 时钟、定时事件与 NPC 日程，待写
+4. [时钟、定时事件与 NPC 日程](04-clock-and-schedule.md)
 5. 手机界面，待写
 
 ## 构建与验证
