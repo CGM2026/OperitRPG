@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.rpg.agent.data
 
+import com.ai.assistance.operit.rpg.agent.contract.ValidatedModule
+import com.ai.assistance.operit.rpg.agent.contract.VersionRef
 import com.ai.assistance.operit.rpg.domain.CampaignShelf
 import com.ai.assistance.operit.rpg.domain.Shelf
 import com.ai.assistance.operit.rpg.domain.ShelfCampaign
@@ -12,12 +14,17 @@ class RoomCampaignShelf(private val db: AgentDatabase) : CampaignShelf {
     override fun load(): Shelf = db.atomic {
         val metas = dao.campaignMetas().associateBy { it.campaignId }
         val groups = dao.campaignGroups().map { ShelfGroup(it.id, it.name, it.sortKey, it.collapsed) }
+        // Location ids are module-scoped identifiers; the shelf shows the module's own place name instead.
+        val catalog = RoomModuleCatalog(db)
+        val modules = HashMap<VersionRef, ValidatedModule>()
         val campaigns = dao.campaignRows().map { campaign ->
             val meta = metas[campaign.id] ?: error("CAMPAIGN_META_MISSING:${campaign.id}")
             ShelfCampaign(
                 campaignId = campaign.id,
                 title = meta.displayTitle ?: campaign.title,
-                subtitle = campaign.locationId,
+                subtitle = modules.getOrPut(VersionRef(campaign.moduleId, campaign.moduleVersion, campaign.moduleHash)) {
+                    catalog.get(VersionRef(campaign.moduleId, campaign.moduleVersion, campaign.moduleHash))
+                }.world.locations.single { it.id == campaign.locationId }.title,
                 updatedAt = maxOf(campaign.updatedAt, meta.lastPlayedAt),
                 groupId = meta.groupId,
                 pinned = meta.pinned,

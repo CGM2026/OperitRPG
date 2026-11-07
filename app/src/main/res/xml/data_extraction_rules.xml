@@ -1,27 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="database" path="rpg-v1.db" />
-        <include domain="database" path="rpg-v1.db-wal" />
-        <include domain="database" path="rpg-v1.db-shm" />
-        <include domain="sharedpref" path="rpg-ui.xml" />
         <include domain="database" path="d20-v05.db" />
         <include domain="database" path="d20-v05.db-wal" />
         <include domain="database" path="d20-v05.db-shm" />
         <include domain="sharedpref" path="rpg-agent-ui.xml" />
-        <include domain="sharedpref" path="d20-navigation.xml" />
-        <include domain="file" path="rpg-agent-module-draft.json" />
     </cloud-backup>
     <device-transfer>
-        <include domain="database" path="rpg-v1.db" />
-        <include domain="database" path="rpg-v1.db-wal" />
-        <include domain="database" path="rpg-v1.db-shm" />
-        <include domain="sharedpref" path="rpg-ui.xml" />
         <include domain="database" path="d20-v05.db" />
         <include domain="database" path="d20-v05.db-wal" />
         <include domain="database" path="d20-v05.db-shm" />
         <include domain="sharedpref" path="rpg-agent-ui.xml" />
-        <include domain="sharedpref" path="d20-navigation.xml" />
-        <include domain="file" path="rpg-agent-module-draft.json" />
     </device-transfer>
 </data-extraction-rules>
