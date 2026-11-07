@@ -22,6 +22,7 @@ class RoomCampaignShelf(private val db: AgentDatabase) : CampaignShelf {
                 groupId = meta.groupId,
                 pinned = meta.pinned,
                 hidden = meta.hidden,
+                finished = meta.finished,
                 avatarGlyph = meta.avatarGlyph,
                 avatarPair = meta.avatarPair
             )
@@ -58,6 +59,10 @@ class RoomCampaignShelf(private val db: AgentDatabase) : CampaignShelf {
 
     override fun setHidden(campaignId: String, hidden: Boolean) = db.atomic {
         dao.setCampaignHidden(campaignId, hidden)
+    }
+
+    override fun setFinished(campaignId: String, finished: Boolean) = db.atomic {
+        dao.setCampaignFinished(campaignId, finished)
     }
 
     override fun rename(campaignId: String, title: String) = db.atomic {

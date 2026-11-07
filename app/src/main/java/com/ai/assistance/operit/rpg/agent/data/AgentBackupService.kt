@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.rpg.agent.data
 
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.agent.rules.Chapters
 import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 import com.ai.assistance.operit.rpg.agent.rules.initialWorld
 import java.io.*
@@ -10,13 +11,26 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import kotlinx.serialization.Serializable
+
+/** Home-shelf metadata carried beside the campaign snapshot; the group is matched by name on import. */
+@Serializable
+data class BackupShelfMeta(
+    val groupName: String? = null,
+    val pinned: Boolean = false,
+    val hidden: Boolean = false,
+    val finished: Boolean = false,
+    val displayTitle: String? = null,
+    val avatarGlyph: String? = null,
+    val avatarPair: String? = null,
+)
 
 /** Snapshot creation holds the DB write lock; ZIP/network IO happens after releasing it.
  * History is copied in 200-row pages and parsed one bounded JSONL record at a time.
  */
 class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:File) {
  constructor(db:AgentDatabase):this(db,File(System.getProperty("java.io.tmpdir")))
- private val names=setOf("campaign.json","initial.json","module.json","turns.jsonl","events.jsonl","memory.jsonl","summaries.jsonl","jobs.jsonl","documents.jsonl","document-parts.jsonl","corrections.jsonl","summary-sources.jsonl","claims.jsonl")
+ private val names=setOf("campaign.json","initial.json","module.json","shelf.json","turns.jsonl","events.jsonl","memory.jsonl","summaries.jsonl","jobs.jsonl","documents.jsonl","document-parts.jsonl","corrections.jsonl","summary-sources.jsonl","claims.jsonl")
  fun export(campaignId:String,output:OutputStream) {
   val dir=createStage()
   try {
@@ -27,6 +41,9 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
     write(dir,"campaign.json",encode(safe))
     write(dir,"initial.json",db.dao().initial(campaignId).joinToString(""){it.text})
     write(dir,"module.json",encode(RoomModuleCatalog(db).get(c.module)))
+    val meta=db.dao().campaignMeta(campaignId)?:error("CAMPAIGN_META_MISSING")
+    val groupName=meta.groupId?.let{id->db.dao().campaignGroups().firstOrNull{it.id==id}?.name}
+    write(dir,"shelf.json",encode(BackupShelfMeta(groupName,meta.pinned,meta.hidden,meta.finished,meta.displayTitle,meta.avatarGlyph,meta.avatarPair)))
     lines(dir,"turns.jsonl") { emit->
      var before:Long?=null
      while(true) { val rows=store.history(campaignId,before,200); if(rows.isEmpty()) break
@@ -89,6 +106,11 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
     val store=RoomAgentStore(db)
     val restored=original.copy(id=newId,modelFingerprint="",narratorFingerprint="",updatedAt=System.currentTimeMillis())
     store.createCampaign(restored)
+    val shelf=decode<BackupShelfMeta>(read(dir,"shelf.json"))
+    val groupId=shelf.groupName?.let{name->
+     db.dao().campaignGroups().firstOrNull{it.name==name}?.id ?: UUID.randomUUID().toString().also{id->db.dao().insertCampaignGroup(CampaignGroupRow(id,name,db.dao().maxGroupSortKey()+1,false))}
+    }
+    db.dao().updateCampaignShelfMeta(newId,groupId,shelf.pinned,shelf.hidden,shelf.finished,shelf.displayTitle,shelf.avatarGlyph,shelf.avatarPair)
     // Preserve the immutable starting state rather than replacing it with the final projection.
     db.openHelper.writableDatabase.execSQL("DELETE FROM initial_state_part WHERE campaignId=?",arrayOf(newId))
     db.dao().insertInitial(textParts(encode(initial)).mapIndexed{i,p->InitialStatePart(newId,i,p)})
@@ -116,6 +138,64 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
     CampaignRef(LONGFORM_ENGINE,newId)
    }
   } finally {dir.deleteRecursively()}
+ }
+ /** Copies the campaign through event [uptoSeq], replaying that prefix to get the new world state. */
+ fun fork(campaignId:String,uptoSeq:Long,newTitle:String?=null):CampaignRef = db.atomic {
+  val store=RoomAgentStore(db)
+  val source=store.loadCampaign(campaignId)?:error("CAMPAIGN_NOT_FOUND")
+  require(db.dao().campaign(campaignId)?.pendingTurnId==null){"FINISH_OR_CANCEL_PENDING_TURN"}
+  require(uptoSeq in 1..source.lastEventSeq){"INVALID_FORK_SEQ"}
+  val module=RoomModuleCatalog(db).get(source.module)
+  val adapter=RuleAdapters.forModule(module)
+  val initial=decode<WorldState>(db.dao().initial(campaignId).joinToString(""){it.text})
+  val events=eventsUpTo(campaignId,uptoSeq)
+  require(events.size.toLong()==uptoSeq && events.last().seq==uptoSeq){"INCOMPLETE_FORK_EVENTS"}
+  val replayed=events.fold(initial){world,event->adapter.applyRecordedEvent(world,event,module)}
+  val chapterId=Chapters.replayId(events,module.rules)
+  val chapterOrdinal=events.flatMap{it.chapters}.lastOrNull()?.ordinal ?: 1
+  val title=newTitle ?: "${source.title}（第 $chapterOrdinal 章起）"
+  val turns=turnsUpTo(campaignId,uptoSeq)
+  val memories=memoriesUpTo(campaignId,uptoSeq)
+  val newId=UUID.randomUUID().toString()
+  fun mapped(id:String)="$newId:$id"
+  val restored=source.copy(id=newId,title=title,world=replayed,revision=uptoSeq,lastEventSeq=uptoSeq,
+   nextTurnOrdinal=turns.maxOfOrNull{it.ordinal+1}?:1,chapterId=chapterId,modelFingerprint="",narratorFingerprint="",updatedAt=System.currentTimeMillis())
+  store.createCampaign(restored)
+  // The fork keeps the source starting state; only the projection is replayed to the fork point.
+  db.openHelper.writableDatabase.execSQL("DELETE FROM initial_state_part WHERE campaignId=?",arrayOf(newId))
+  db.dao().insertInitial(textParts(encode(initial)).mapIndexed{i,p->InitialStatePart(newId,i,p)})
+  val meta=db.dao().campaignMeta(campaignId)?:error("CAMPAIGN_META_MISSING")
+  db.dao().updateCampaignShelfMeta(newId,meta.groupId,false,false,false,null,meta.avatarGlyph,meta.avatarPair)
+  turns.forEach { t->
+   store.persistTurn(t.copy(id=mapped(t.id),campaignId=newId,clientMessageId=mapped(t.clientMessageId),result=t.result?.let{it.copy(turnId=mapped(it.turnId))}))
+  }
+  events.forEach { e->
+   val turn=db.dao().turn(newId,mapped(e.turnId))?:error("DANGLING_EVENT_TURN")
+   val stored=decode<Turn>(turn.json)
+   val result=requireNotNull(stored.result)
+   require(result.eventSeq==e.seq && result.dice==e.dice && result.turnId==stored.id){"EVENT_RESULT_MISMATCH"}
+   val ne=e.copy(campaignId=newId,turnId=mapped(e.turnId))
+   db.dao().insertEvent(EventRow(newId,ne.seq,ne.turnId,ne.eventVersion,encode(ne)))
+  }
+  val memory=RoomMemoryRepository(db)
+  memories.forEach { m->memory.save(m.copy(id=mapped(m.id),campaignId=newId,supersedesId=m.supersedesId?.let(::mapped),sourceTurnId=m.sourceTurnId?.let(::mapped))) }
+  memories.forEach { m->m.supersedesId?.let{require(db.dao().memory(newId,mapped(it))!=null){"DANGLING_CORRECTION"}} }
+  CampaignRef(LONGFORM_ENGINE,newId)
+ }
+ private fun eventsUpTo(campaignId:String,uptoSeq:Long):List<WorldEvent> {
+  val out=mutableListOf<WorldEvent>();var after=0L
+  while(true) {val rows=db.dao().events(campaignId,after,200);if(rows.isEmpty())break;rows.forEach{out+=decode<WorldEvent>(it.json)};if(rows.last().seq>=uptoSeq)break;after=rows.last().seq}
+  return out.filter{it.seq<=uptoSeq}.sortedBy{it.seq}
+ }
+ private fun turnsUpTo(campaignId:String,uptoSeq:Long):List<Turn> {
+  val out=mutableListOf<Turn>();var before:Long?=null
+  while(true) {val rows=RoomAgentStore(db).history(campaignId,before,200);if(rows.isEmpty())break;out+=rows;before=rows.last().ordinal}
+  return out.filter{it.phase in setOf(TurnPhase.COMPLETE,TurnPhase.CANCELLED) && (it.result?.eventSeq ?: it.baseRevision)<=uptoSeq}.sortedBy{it.ordinal}
+ }
+ private fun memoriesUpTo(campaignId:String,uptoSeq:Long):List<MemoryItem> {
+  val out=mutableListOf<MemoryItem>();var after=""
+  while(true) {val rows=db.dao().exportMemory(campaignId,after,200);if(rows.isEmpty())break;rows.forEach{row->if(row.toSeq<=uptoSeq)out+=MemoryItem(row.id,row.campaignId,row.text,decode(row.entitiesJson),row.fromSeq,row.toSeq,Visibility(Audience.valueOf(row.audience),row.subjectId),row.status,row.supersedesId,row.sourceTurnId,row.kind)};after=rows.last().id}
+  return out
  }
  private fun createStage():File { require(tempDirectory.isDirectory || tempDirectory.mkdirs());return File(tempDirectory,"rpg-backup-${UUID.randomUUID()}").also{require(it.mkdir())} }
  private fun write(dir:File,name:String,text:String)=File(dir,name).writeText(text,Charsets.UTF_8)

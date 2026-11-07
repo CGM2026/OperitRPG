@@ -21,7 +21,7 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
   require(module.hash==campaign.module.hash && module.state=="READY") { "MODULE_VERSION_MISMATCH" }
   val definition=RoomModuleCatalog(db).get(campaign.module)
   require(campaign.rules==VersionRef(definition.rules.adapterId,definition.rules.adapterVersion,definition.contentHash)){"RULE_VERSION_MISMATCH"}
-  dao.insertCampaign(campaign.row(null)); dao.insertCampaignMeta(CampaignMetaRow(campaign.id,null,false,false,null,null,null,campaign.updatedAt)); saveWorld(campaign)
+  dao.insertCampaign(campaign.row(null)); dao.insertCampaignMeta(CampaignMetaRow(campaign.id,null,false,false,null,null,null,campaign.updatedAt,false)); saveWorld(campaign)
   dao.insertInitial(textParts(encode(campaign.world)).mapIndexed{i,p->InitialStatePart(campaign.id,i,p)})
  }
  override fun loadCampaign(campaignId:String):Campaign?=db.atomic { dao.campaign(campaignId)?.let(::campaign) }

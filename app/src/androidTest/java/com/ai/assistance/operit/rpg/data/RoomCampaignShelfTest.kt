@@ -29,8 +29,8 @@ class RoomCampaignShelfTest {
         shelf = RoomCampaignShelf(db)
         db.dao().insertCampaign(campaign("a"))
         db.dao().insertCampaign(campaign("b"))
-        db.dao().insertCampaignMeta(CampaignMetaRow("a", null, false, false, null, null, null, 500L))
-        db.dao().insertCampaignMeta(CampaignMetaRow("b", null, false, false, null, null, null, 0L))
+        db.dao().insertCampaignMeta(CampaignMetaRow("a", null, false, false, null, null, null, 500L, false))
+        db.dao().insertCampaignMeta(CampaignMetaRow("b", null, false, false, null, null, null, 0L, false))
     }
 
     @After fun cleanup() {
@@ -52,6 +52,7 @@ class RoomCampaignShelfTest {
         shelf.moveToGroup("a", first)
         shelf.setPinned("a", true)
         shelf.setHidden("b", true)
+        shelf.setFinished("a", true)
         shelf.rename("a", "新标题")
         shelf.setAvatar("a", "sword", "ink")
         shelf.setAvatar("b", "lantern", null)
@@ -64,6 +65,8 @@ class RoomCampaignShelfTest {
         assertEquals(first, a.groupId)
         assertTrue(a.pinned)
         assertFalse(a.hidden)
+        assertTrue(a.finished)
+        assertFalse(b.finished)
         assertEquals("sword", a.avatarGlyph)
         assertEquals("ink", a.avatarPair)
         val b = loaded.getValue("b")
@@ -73,11 +76,13 @@ class RoomCampaignShelfTest {
 
         shelf.setPinned("a", false)
         shelf.setHidden("b", false)
+        shelf.setFinished("a", false)
         shelf.setAvatar("a", null, null)
         shelf.moveToGroup("a", null)
         val reset = shelf.load().campaigns.associateBy { it.campaignId }
         assertFalse(reset.getValue("a").pinned)
         assertFalse(reset.getValue("b").hidden)
+        assertFalse(reset.getValue("a").finished)
         assertNull(reset.getValue("a").avatarGlyph)
         assertNull(reset.getValue("a").avatarPair)
         assertNull(reset.getValue("a").groupId)

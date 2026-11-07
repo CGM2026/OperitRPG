@@ -24,6 +24,7 @@ class HomeViewModelTest {
         groupId = groupId,
         pinned = pinned,
         hidden = hidden,
+        finished = false,
         avatarGlyph = null,
         avatarPair = null,
     )
@@ -122,6 +123,8 @@ private class FakeShelf(private val current: Shelf) : CampaignShelf {
     override fun setPinned(campaignId: String, pinned: Boolean) = Unit
 
     override fun setHidden(campaignId: String, hidden: Boolean) = Unit
+
+    override fun setFinished(campaignId: String, finished: Boolean) = Unit
 
     override fun rename(campaignId: String, title: String) = Unit
 
