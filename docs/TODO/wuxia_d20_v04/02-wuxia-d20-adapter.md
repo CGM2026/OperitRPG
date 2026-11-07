@@ -224,3 +224,14 @@
 - 状态每轮末再抵御
 - 短休与长休的恢复与时间推进
 - 1000 次随机提议的事件重放：重放所得状态与在线结算逐字段相同
+
+## 02b 补充：公开骰点与 app 持久化
+
+第 02 步实现后发现的缺口，作为同一步的补充完成。
+
+- `CommittedResult` 新增 `rolls: List<RollRecord> = emptyList()`。`WuxiaD20.resolve` 填入本次全部骰点，但仅当 `actorId` 是玩家且 `purpose` 以 `check:`、`save:` 或 `concentration` 开头时保留 `target`，其余一律置为 null，避免公开 NPC 的守御与难度。旁白上下文与界面只读这份公开骰点。
+- `PublicProjection` 的 `d20Player`、`d20Visible` 进入旁白上下文，玩家面板据此显示。
+- app 的 `RoomAgentStore` 按战役规则适配器校验事件版本：`generic-d100-v1` 只接受 1，`wuxia-d20-v1` 只接受 2。
+- `WorldState.d20` 以 JSON 文本持久化在战役行的新列 `d20Json`，可为 null。`AgentDatabase` 升到版本 2，提供 `Migration(1,2)` 用 `ALTER TABLE` 加列，不使用破坏性迁移。
+- `AgentBackupService` 的导出与恢复包含 `d20Json`，恢复后经适配器重放校验与之前一致。
+- 相应的 androidTest 增加 wuxia 战役的写入、重开与备份恢复用例。
