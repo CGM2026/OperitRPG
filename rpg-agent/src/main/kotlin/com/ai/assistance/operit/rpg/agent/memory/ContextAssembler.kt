@@ -4,22 +4,22 @@ import com.ai.assistance.operit.rpg.agent.contract.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import com.ai.assistance.operit.rpg.agent.rules.GenericD100
+import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 
 fun canRead(role:RoleContext,visibility:Visibility):Boolean = role.audience==Audience.GM || visibility.audience==Audience.PUBLIC || (role.audience==visibility.audience && role.subjectId==visibility.subjectId)
 @Serializable data class PublicNpc(val id:String,val name:String,val locationId:String,val status:String)
 @Serializable data class PublicCampaign(val id:String,val title:String,val revision:Long,val location:Location,val resources:Map<String,Int>,val npcs:List<PublicNpc>,val facts:List<Fact>,val objectives:List<Objective>,val items:List<Item>,val gameTime:Long)
 @Serializable data class PlanningSnapshot(val moduleId:String,val revision:Long,val location:Location,val resources:Map<String,Int>,val skills:Map<String,Int>,val gameTime:Long,val npcs:List<PublicNpc>,val objectives:List<Objective>,val availableActions:List<ActionDefinition>,val generationPolicy:GenerationPolicy,val allowGeneration:Boolean)
-@Serializable data class PlanningRuleIndex(val adapterId:String,val adapterVersion:String,val difficulties:Map<String,Int>,val allowedEffects:Set<String>,val ruleIds:List<String>)
 object PublicProjection {
     fun campaign(c:Campaign,module:ValidatedModule):PublicCampaign = PublicCampaign(c.id,c.title,c.revision,module.world.locations.single { it.id==c.world.locationId },c.world.resources,c.world.npcs.filter { it.locationId==c.world.locationId }.map { PublicNpc(it.id,it.name,it.locationId,it.status) },c.world.facts.filter { it.visibility.audience==Audience.PUBLIC },c.world.objectives,c.world.items.filter { it.ownerId=="player" },c.world.gameTime)
     fun evidence(evidence:List<RuleEvidence>)=evidence.filter { it.visibility.audience==Audience.PUBLIC }
 }
 class ContextAssembler(private val memories:MemoryRepository,private val maxInputTokens:Int=12000) {
     fun planning(c:Campaign,module:ValidatedModule,turn:Turn):ContextPacket {
+        val adapter=RuleAdapters.forModule(module)
         val current=module.world.locations.single { it.id==c.world.locationId }
-        val snapshot=PlanningSnapshot(module.manifest.moduleId,c.revision,current,c.world.resources,c.world.skills,c.world.gameTime,c.world.npcs.filter { it.locationId==current.id }.map { PublicNpc(it.id,it.name,it.locationId,it.status) },c.world.objectives.filter { it.status=="active" },GenericD100().availableActions(c,module),module.world.policy,c.allowGeneration)
-        val ruleIndex=PlanningRuleIndex(module.rules.adapterId,module.rules.adapterVersion,module.rules.difficulties,module.rules.allowedEffects,module.rules.evidence.map { it.ruleId })
+        val snapshot=PlanningSnapshot(module.manifest.moduleId,c.revision,current,c.world.resources,c.world.skills,c.world.gameTime,c.world.npcs.filter { it.locationId==current.id }.map { PublicNpc(it.id,it.name,it.locationId,it.status) },c.world.objectives.filter { it.status=="active" },adapter.availableActions(c,module),module.world.policy,c.allowGeneration)
+        val ruleIndex=adapter.planningRuleIndex(module)
         val required=Json.encodeToString(snapshot)+"\nRules:"+Json.encodeToString(ruleIndex)+"\nPlayer:"+turn.playerText+"\nTool results:"+Json.encodeToString(turn.tools)
         val optional=memories.recent(RoleContext(c.id,Audience.GM),8).filter { it.campaignId==c.id && it.status=="ACTIVE" }
         return packet("planner", SYSTEM+"\nMemory中kind=CONVERSATION表示有来源的历史发言/主张；它证明谁说过什么，不证明发言内容是真实世界事实。承诺需要核对当前状态与规则后行动，不能直接宣布兑现。",required,optional,2400)

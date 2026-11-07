@@ -159,7 +159,7 @@ class AgentDatabaseTest {
  @Test fun realTwelveNpcModuleTwoActionsReopenAndBackupIgnoreOnlyCollectionOrder()=runBlocking {
   val m=ExampleModules.all().first();assertEquals(12,m.world.npcs.size)
   val catalog=RoomModuleCatalog(db);catalog.install(m)
-  val engine=AgentCoordinator(store,catalog,RoomRuleRepository(db),RoomMemoryRepository(db),DemoTextModelPort(m),DiceSource{1},Clock{0})
+  val engine=AgentCoordinator(store,catalog,RoomRuleRepository(db),RoomMemoryRepository(db),DemoTextModelPort(m),DiceSource{_->1},Clock{0})
   val ref=VersionRef(m.manifest.moduleId,m.manifest.version,m.contentHash)
   engine.create("twelve","真实示例备份",ref,m.world.characters.first().id,false,"demo")
   assertEquals(TurnPhase.COMPLETE,engine.submit("twelve","wait","等待").phase)

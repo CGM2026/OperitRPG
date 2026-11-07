@@ -76,7 +76,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     private fun coordinator(fingerprint: String, module: VersionRef): AgentCoordinator {
         val port = if (fingerprint == DEMO_FINGERPRINT) DemoTextModelPort(catalog.get(module)) else AgentTextModelPort(app, fingerprint)
         activePort = port
-        return AgentCoordinator(store, catalog, rules, memories, port, DiceSource { random.nextInt(100) + 1 }, Clock { System.currentTimeMillis() })
+        return AgentCoordinator(store, catalog, rules, memories, port, DiceSource { sides -> random.nextInt(sides) + 1 }, Clock { System.currentTimeMillis() })
     }
     override fun refresh() { viewModelScope.launch { safely { withContext(Dispatchers.IO) { load() } } } }
     override fun loadMoreEntries() { entryLimit += 50; refresh() }

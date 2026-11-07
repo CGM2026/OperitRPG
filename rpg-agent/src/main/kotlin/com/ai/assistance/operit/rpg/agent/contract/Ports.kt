@@ -21,5 +21,8 @@ interface ModuleCatalog { fun get(ref: VersionRef): ValidatedModule; fun list():
 interface RuleRepository { fun search(role: RoleContext, module: VersionRef, query: String, limit: Int = 5): List<RuleEvidence>; fun read(role: RoleContext, module: VersionRef, sourceId: String, anchor: String): RuleEvidence? }
 interface MemoryRepository { fun search(role: RoleContext, query: String, entityIds: List<String>, limit: Int = 5): List<MemoryItem>; fun recent(role: RoleContext, limit: Int): List<MemoryItem>; fun save(item: MemoryItem) }
 interface TextModelPort { suspend fun generate(attemptId: String, packet: ContextPacket): TextModelReply; fun cancel(attemptId: String) }
-fun interface DiceSource { fun d100(): Int }
+fun interface DiceSource {
+    /** 返回 1..sides 的整数。 */
+    fun roll(sides: Int): Int
+}
 fun interface Clock { fun nowMillis(): Long }

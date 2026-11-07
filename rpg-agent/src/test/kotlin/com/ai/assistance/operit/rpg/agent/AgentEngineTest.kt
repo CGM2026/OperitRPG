@@ -54,7 +54,7 @@ class TestMemories:MemoryRepository {
 class AgentEngineTest {
     private val m=ExampleModules.all().first()
     private fun fixture(model:TextModelPort=DemoTextModelPort(m),store:TestStore=TestStore()):Pair<AgentCoordinator,TestStore> {
-        val a=AgentCoordinator(store,TestCatalog(m),TestRules(m),TestMemories(),model,DiceSource { 12 },Clock { 1000 })
+        val a=AgentCoordinator(store,TestCatalog(m),TestRules(m),TestMemories(),model,DiceSource { _ -> 12 },Clock { 1000 })
         a.create("c","长团",VersionRef(m.manifest.moduleId,m.manifest.version,m.contentHash),m.world.characters.first().id,true,"demo")
         return a to store
     }
@@ -166,7 +166,7 @@ class AgentEngineTest {
             val adapter=GenericD100(); val ref=VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash)
             var c=Campaign("c","chapters",ref,VersionRef(module.rules.adapterId,module.rules.adapterVersion,module.contentHash),0,0,initialWorld(module,module.world.characters.first().id),false,"demo",0)
             val recorded=mutableListOf<WorldEvent>()
-            fun execute(p:ActionProposal) { val plan=freeze(c,p,module.rules.evidence); val (event,_)=adapter.resolve(c,plan,module,"turn-${c.revision}",DiceSource { 1 }); c=c.copy(world=adapter.applyRecordedEvent(c.world,event,module),revision=c.revision+1,lastEventSeq=event.seq); recorded+=event }
+            fun execute(p:ActionProposal) { val plan=freeze(c,p,module.rules.evidence); val (event,_)=adapter.resolve(c,plan,module,"turn-${c.revision}",DiceSource { _ -> 1 }); c=c.copy(world=adapter.applyRecordedEvent(c.world,event,module),revision=c.revision+1,lastEventSeq=event.seq); recorded+=event }
             module.world.locations.forEachIndexed { i,l ->
                 if(i>0) { val e=module.rules.evidence.first { it.ruleId.endsWith(":travel") }; execute(ActionProposal("move",listOf(l.id),null,"normal",listOf(e.ruleId),emptyList(),listOf(Effect("move",l.id,source=e.source),Effect("time","world",amount=10,source=e.source)),emptyList(),publicSummary="移动")) }
                 val a=adapter.availableActions(c,module).single { it.targetIds==listOf(l.id) }

@@ -1,7 +1,7 @@
 package com.ai.assistance.operit.rpg.agent.data
 
 import com.ai.assistance.operit.rpg.agent.contract.*
-import com.ai.assistance.operit.rpg.agent.rules.GenericD100
+import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 import com.ai.assistance.operit.rpg.agent.rules.initialWorld
 import java.io.*
 import java.nio.charset.CodingErrorAction
@@ -71,7 +71,7 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
    require(manifest.archiveFormatVersion==2 && manifest.engineId==LONGFORM_ENGINE && manifest.engineVersion==1 && manifest.eventSchemaVersion==1){"UNSUPPORTED_BACKUP_VERSION"}
    require(manifest.files.map{it.path}.toSet()==names && manifest.files.size==names.size){"INVALID_FILE_MANIFEST"}
    manifest.files.forEach { f->val file=File(dir,f.path);require(file.length()==f.size && digest(file)==f.sha256){"BACKUP_HASH_MISMATCH:${f.path}"} }
-   val module=decode<ValidatedModule>(read(dir,"module.json"));val adapter=GenericD100();validateStoredModule(module)
+   val module=decode<ValidatedModule>(read(dir,"module.json"));val adapter=RuleAdapters.forModule(module);validateStoredModule(module)
    require(VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash)==manifest.module)
    val original=decode<Campaign>(read(dir,"campaign.json"));val initial=decode<WorldState>(read(dir,"initial.json"))
    require(original.module==manifest.module && original.rules==manifest.rules && original.modelFingerprint.isEmpty())

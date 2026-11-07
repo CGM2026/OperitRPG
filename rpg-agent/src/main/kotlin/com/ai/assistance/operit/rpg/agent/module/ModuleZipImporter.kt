@@ -27,7 +27,7 @@ object ModuleValidator {
         val manifest=ModuleManifest(1,draft.moduleId,draft.version,draft.title,draft.author,draft.description,1,rules.adapterId,rules.adapterVersion,files.toSortedMap().map { FileDigest(it.key,it.value.toByteArray().size.toLong(),digest(it.value)) })
         require(manifest.moduleId.matches(Regex("[a-z][a-z0-9-]{2,63}")))
         val module=ValidatedModule(manifest,digest(StrictJson.json.encodeToString(manifest)),world,rules,draft.sources,files)
-        GenericD100().validateModule(module); return module
+        RuleAdapters.forModule(module).validateModule(module); return module
     }
 }
 
@@ -69,7 +69,7 @@ class ModuleZipImporter {
             val source=files[e.source.sourceId]; require(source!=null && sha256(source)==e.source.sourceHash) { "SOURCE_HASH_MISMATCH" }
             require(e.source.anchor.isNotBlank() && decodeUtf8(source).contains(e.quote) && e.quote.isNotBlank()) { "INVALID_RULE_QUOTE" }
         }
-        GenericD100().validateModule(module)
+        RuleAdapters.forModule(module).validateModule(module)
         return module
     }
     private fun safePath(path:String):Boolean {

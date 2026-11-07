@@ -2,7 +2,7 @@ package com.ai.assistance.operit.rpg.agent.data
 
 import com.ai.assistance.operit.rpg.agent.contract.*
 import java.util.UUID
-import com.ai.assistance.operit.rpg.agent.rules.GenericD100
+import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 import com.ai.assistance.operit.rpg.agent.tools.StrictJson
 import kotlinx.serialization.encodeToString
 
@@ -52,7 +52,7 @@ internal fun validateStoredModule(module:ValidatedModule) {
  require(decode<ModuleWorld>(module.originalFiles.getValue("module/world.json"))==module.world && decode<ModuleRules>(module.originalFiles.getValue("module/rules.json"))==module.rules){"MODULE_DEFINITION_MISMATCH"}
  require(module.originalFiles.filterKeys{it.startsWith("module/sources/") }==module.sources)
  module.rules.evidence.forEach{e->val source=module.sources.getValue(e.source.sourceId);require(sha256(source)==e.source.sourceHash && source.contains(e.quote) && e.quote.isNotBlank())}
- GenericD100().validateModule(module)
+ RuleAdapters.forModule(module).validateModule(module)
 }
 
 class RoomRuleRepository(private val db:AgentDatabase):RuleRepository {

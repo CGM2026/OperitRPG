@@ -10,11 +10,10 @@ import kotlinx.serialization.json.*
 import java.util.UUID
 
 class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCatalog,private val rules:RuleRepository,private val memories:MemoryRepository,private val model:TextModelPort,private val dice:DiceSource,private val clock:Clock) {
-    private val adapter=GenericD100()
     private val contexts=ContextAssembler(memories)
     private val tools=ToolRegistry(rules,memories)
     fun create(id:String,title:String,moduleRef:VersionRef,characterId:String,allowGeneration:Boolean,modelFingerprint:String):Campaign {
-        val m=catalog.get(moduleRef); adapter.validateModule(m)
+        val m=catalog.get(moduleRef); RuleAdapters.forModule(m).validateModule(m)
         require(m.contentHash==moduleRef.hash && modelFingerprint.isNotBlank())
         val c=Campaign(id,title,moduleRef,VersionRef(m.rules.adapterId,m.rules.adapterVersion,m.contentHash),0,0,initialWorld(m,characterId),allowGeneration,modelFingerprint,clock.nowMillis())
         store.createCampaign(c); return c
@@ -100,7 +99,7 @@ class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCa
                                 }.filter { it in m.rules.evidence }
                             }
                         }.distinct().filter { it.ruleId in p.ruleRefs }
-                        adapter.validateProposal(c,m,p,evidence)
+                        RuleAdapters.forModule(m).validateProposal(c,m,p,evidence)
                         val plan=freeze(c,p,evidence)
                         val confirmation=p.requiresConfirmation || p.temporaryRuling || p.creations.isNotEmpty()
                         mutate(campaignId,turnId) { campaign,old -> require(campaign.revision==c.revision && old.phase==TurnPhase.GATHERING) { "STALE_ATTEMPT" }; old.copy(plan=plan,phase=if(confirmation)TurnPhase.AWAITING_CONFIRMATION else TurnPhase.READY) }
@@ -120,7 +119,7 @@ class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCa
         if(t.phase==TurnPhase.COMMITTED)return@transaction t
         require(t.phase==TurnPhase.READY)
         val plan=requireNotNull(t.plan); require(freeze(c,plan.proposal,plan.evidence).planHash==plan.planHash) { "STALE_PROPOSAL" }
-        val m=catalog.get(c.module); val (event,result)=adapter.resolve(c,plan,m,turnId,dice)
+        val m=catalog.get(c.module); val adapter=RuleAdapters.forModule(m); val (event,result)=adapter.resolve(c,plan,m,turnId,dice)
         val world=adapter.applyRecordedEvent(c.world,event,m)
         tx.appendEvent(event)
         tx.saveCampaign(c.copy(world=world,revision=c.revision+1,lastEventSeq=event.seq,updatedAt=clock.nowMillis()))

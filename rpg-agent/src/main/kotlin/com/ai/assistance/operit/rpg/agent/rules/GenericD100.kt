@@ -3,6 +3,10 @@ package com.ai.assistance.operit.rpg.agent.rules
 import com.ai.assistance.operit.rpg.agent.contract.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import java.security.MessageDigest
 
 fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -10,6 +14,7 @@ fun digest(text: String): String = sha256(text.toByteArray(Charsets.UTF_8))
 
 interface RuleAdapter {
     fun validateModule(module: ValidatedModule)
+    fun planningRuleIndex(module: ValidatedModule): JsonObject
     fun availableActions(campaign: Campaign, module: ValidatedModule): List<ActionDefinition>
     fun validateProposal(campaign: Campaign, module: ValidatedModule, proposal: ActionProposal, evidence: List<RuleEvidence>)
     fun resolve(campaign: Campaign, plan: FrozenPlan, module: ValidatedModule, turnId: String, dice: DiceSource): Pair<WorldEvent, CommittedResult>
@@ -21,6 +26,15 @@ class GenericD100 : RuleAdapter {
     companion object {
         val effects = setOf("move", "resource", "transfer_item", "reveal_fact", "objective", "npc_status", "npc_relation", "knowledge", "time")
         val actionTypes = setOf("investigate", "move", "negotiate", "use_item", "wait", "skill_check")
+    }
+    override fun planningRuleIndex(module: ValidatedModule): JsonObject = module.rules.let { r ->
+        buildJsonObject {
+            put("adapterId", JsonPrimitive(r.adapterId))
+            put("adapterVersion", JsonPrimitive(r.adapterVersion))
+            put("difficulties", JsonObject(r.difficulties.mapValues { JsonPrimitive(it.value) }))
+            put("allowedEffects", JsonArray(r.allowedEffects.map { JsonPrimitive(it) }))
+            put("ruleIds", JsonArray(r.evidence.map { JsonPrimitive(it.ruleId) }))
+        }
     }
     override fun validateModule(module: ValidatedModule) {
         val w = module.world; val r = module.rules
@@ -121,7 +135,7 @@ class GenericD100 : RuleAdapter {
         validateProposal(campaign,module,plan.proposal,plan.evidence)
         require(plan.proposal.conditions.all { condition(it,campaign.world) }) { "CONDITION_FAILED" }
         val p=plan.proposal
-        val roll=p.skill?.let { val value=dice.d100(); require(value in 1..100); DiceRoll(100,value,(campaign.world.skills.getValue(it)+module.rules.difficulties.getValue(p.difficulty)).coerceIn(1,100)) }
+        val roll=p.skill?.let { val value=dice.roll(100); require(value in 1..100); DiceRoll(100,value,(campaign.world.skills.getValue(it)+module.rules.difficulties.getValue(p.difficulty)).coerceIn(1,100)) }
         val success=roll == null || roll.value <= roll.threshold
         val event=WorldEvent(1,campaign.id,campaign.lastEventSeq+1,turnId,if(success)p.successEffects else p.failureEffects,if(success)p.creations else emptyList(),roll,Visibility(Audience.PUBLIC),(plan.evidence.map { it.source }+(if(success)p.successEffects else p.failureEffects).map { it.source }).distinct())
         applyRecordedEvent(campaign.world,event,module)
