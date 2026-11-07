@@ -1,7 +1,5 @@
 package com.ai.assistance.operit.rpg.model
 
-import com.ai.assistance.operit.rpg.core.ModelConfiguration
-import com.ai.assistance.operit.rpg.core.sha256
 import kotlinx.serialization.json.*
 
 enum class ModelProtocol { OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC, GEMINI }

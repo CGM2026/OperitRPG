@@ -1,6 +1,5 @@
 package com.ai.assistance.operit.rpg.model
 
-import com.ai.assistance.operit.rpg.core.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import okhttp3.*
@@ -23,30 +22,24 @@ class OperitModelGateway(
     private val configuration: suspend (String) -> RpgModelConfig?,
     client: OkHttpClient = OkHttpClient(),
     private val timeoutMillis: Long = 60_000
-) : ModelGateway {
+) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).authenticator(Authenticator.NONE).proxyAuthenticator(Authenticator.NONE)
         .callTimeout(timeoutMillis, TimeUnit.MILLISECONDS).build()
     private val active = ConcurrentHashMap<String, Call>()
-    override suspend fun plan(request: ModelRequest) = run(request)
-    override suspend fun narrate(request: ModelRequest) = run(request)
-    override suspend fun cancel(attemptId: String) { active[attemptId]?.cancel() }
+    suspend fun cancel(attemptId: String) { active[attemptId]?.cancel() }
     fun cancelNow(attemptId: String) { active[attemptId]?.cancel() }
-    /** Long-form context is assembled by its own engine and must never be reshaped as legacy history. */
-    suspend fun generateText(request: ModelRequest): ModelReply = run(request, legacyBudget = false)
-    private suspend fun run(request: ModelRequest, legacyBudget: Boolean = true): ModelReply = withContext(Dispatchers.IO) {
+    /** Context is assembled by the agent engine; the gateway only enforces the input budget and never reshapes it. */
+    suspend fun generateText(request: ModelRequest): ModelReply = withContext(Dispatchers.IO) {
         val config = configuration(request.configuration.configurationId) ?: throw ModelRequestException("模型配置已删除，请恢复原配置或明确重新绑定中断叙述")
         val protocol = config.protocol ?: throw ModelRequestException(config.unsupportedReason ?: "此配置需要重新配置")
         require(config.providerId == request.configuration.providerId && request.configuration.modelId in config.modelNames &&
             configurationFingerprint(config, request.configuration.modelId) == request.configuration.fingerprint) { "模型配置已改变，请恢复原配置或明确重新绑定中断叙述" }
         require(config.apiKey.length <= 16_384 && config.apiKey.all { it.code in 0x20..0x7e }) { "API Key包含无效字符，请重新填写" }
-        val prompt = if (legacyBudget) ModelProtocolCodec.budget(request.systemPrompt, request.userPrompt) else {
-            require(request.maxOutputTokens in 1..8192 && request.systemPrompt.length + request.userPrompt.length <= 64_000) { "模型输入超过预算" }
-            val estimate = (request.systemPrompt + request.userPrompt).sumOf { if (it.code in 0x4E00..0x9FFF) 1.5 else 0.5 }
-            require(estimate <= 12_000) { "必要上下文超过输入预算，请缩小任务范围" }
-            request.userPrompt
-        }
-        val body = ModelProtocolCodec.request(protocol, request.configuration.modelId, request.systemPrompt, prompt, request.maxOutputTokens)
+        require(request.maxOutputTokens in 1..8192 && request.systemPrompt.length + request.userPrompt.length <= 64_000) { "模型输入超过预算" }
+        val estimate = (request.systemPrompt + request.userPrompt).sumOf { if (it.code in 0x4E00..0x9FFF) 1.5 else 0.5 }
+        require(estimate <= 12_000) { "必要上下文超过输入预算，请缩小任务范围" }
+        val body = ModelProtocolCodec.request(protocol, request.configuration.modelId, request.systemPrompt, request.userPrompt, request.maxOutputTokens)
         val builder = Request.Builder().url(modelEndpoint(config, request.configuration.modelId))
             .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
         if (protocol == ModelProtocol.ANTHROPIC) builder.header("anthropic-version", "2023-06-01")
@@ -106,7 +99,7 @@ fun validateEndpoint(endpoint: String): HttpUrl {
     return url
 }
 
-/** Retains published completion rules for legacy endpoints; never changes host or protocol. */
+/** Retains the published completion rules for saved endpoints; never changes host or protocol. */
 fun modelEndpoint(config: RpgModelConfig, model: String): HttpUrl {
     val base = validateEndpoint(config.endpoint)
     val protocol = requireNotNull(config.protocol)
@@ -131,13 +124,4 @@ fun modelEndpoint(config: RpgModelConfig, model: String): HttpUrl {
         else -> path
     }
     return base.newBuilder().encodedPath(completed).build()
-}
-
-/** DEMO requires an explicit user selection and is never selected after a network error. */
-class SelectedModelGateway(private val real: ModelGateway) : ModelGateway {
-    private val demo = FakeModelGateway()
-    private val demoConfiguration = ModelConfiguration("demo", "DEMO", "script-v1", "demo-v1")
-    override suspend fun plan(request: ModelRequest) = if (request.configuration == demoConfiguration) demo.plan(request) else real.plan(request)
-    override suspend fun narrate(request: ModelRequest) = if (request.configuration == demoConfiguration) demo.narrate(request) else real.narrate(request)
-    override suspend fun cancel(attemptId: String) = real.cancel(attemptId)
 }

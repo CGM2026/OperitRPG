@@ -1,6 +1,6 @@
 name: D20 agent tests
 
-# Runs the pure JVM engine tests and a debug Kotlin compile of the app on feature branches.
+# Runs the pure JVM engine tests, the app unit tests and a debug Kotlin compile of the app on feature branches.
 # Agents working on this repo do not build locally (see AGENTS.md); this workflow is their feedback loop.
 on:
   push:
@@ -57,13 +57,23 @@ jobs:
         shell: bash
         run: set -o pipefail; ./gradlew -p rpg-agent test --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-agent.log"
 
-      - name: rpg-core tests
-        shell: bash
-        run: set -o pipefail; ./gradlew -p rpg-core test --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-core.log"
-
       - name: App debug Kotlin compile
         shell: bash
         run: set -o pipefail; ./gradlew :app:compileDebugKotlin --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-app.log"
+
+      - name: App unit tests
+        shell: bash
+        run: set -o pipefail; ./gradlew :app:testDebugUnitTest --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-app-test.log"
+
+      # kapt writes the Room schema JSON during the compile above. Publishing it lets a maintainer
+      # commit the generated app/schemas/ file without a local Android toolchain.
+      - name: Upload Room schemas
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: room-schemas
+          path: app/schemas/
+          if-no-files-found: warn
 
       # Run pages show annotations without sign-in; agents read failures from them.
       - name: Publish failures as annotations
@@ -82,7 +92,7 @@ jobs:
                       print(f"::error file={path},line={m[2]},col={m[3]},title=Kotlin compile::{esc(m[4])}")
                   elif line.startswith('e: '):
                       print(f"::error title=Kotlin compile::{esc(line[3:].strip())}")
-          for xml in glob.glob('rpg-*/build/test-results/test/*.xml'):
+          for xml in glob.glob('rpg-*/build/test-results/test/*.xml') + glob.glob('app/build/test-results/testDebugUnitTest/*.xml'):
               for case in ET.parse(xml).getroot().iter('testcase'):
                   for bad in list(case.findall('failure')) + list(case.findall('error')):
                       text = (bad.get('message') or '') + '\n' + (bad.text or '')[:1500]
@@ -96,5 +106,5 @@ jobs:
           name: agent-test-reports
           path: |
             rpg-agent/build/reports/tests/
-            rpg-core/build/reports/tests/
+            app/build/reports/tests/
           if-no-files-found: ignore

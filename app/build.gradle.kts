@@ -60,12 +60,12 @@ tasks.matching { it.name == "packageRelease" || it.name == "bundleRelease" }.con
     } }
 }
 dependencies {
-    implementation(project(":rpg-core"))
     implementation(project(":rpg-agent"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.navigation.compose)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)

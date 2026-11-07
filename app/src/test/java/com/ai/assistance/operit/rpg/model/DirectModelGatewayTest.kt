@@ -1,6 +1,5 @@
 package com.ai.assistance.operit.rpg.model
 
-import com.ai.assistance.operit.rpg.core.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
@@ -34,7 +33,7 @@ class DirectModelGatewayTest {
     @Test fun allFourProtocolsSendOnlyExplicitTextAndExtractVisibleResponse()=runBlocking {
         for(protocol in ModelProtocol.entries) {
             server.enqueue(MockResponse().setBody(response(protocol)).setHeader("Content-Type","application/json"))
-            val config=config(protocol); val result=gateway(config).plan(request(config,protocol.name))
+            val config=config(protocol); val result=gateway(config).generateText(request(config,protocol.name))
             assertEquals("可见正文",result.text); assertEquals(Usage(10,5),result.usage)
             val sent=server.takeRequest(2,TimeUnit.SECONDS)!!
             val body=Json.parseToJsonElement(sent.body.readUtf8()).jsonObject
@@ -52,22 +51,16 @@ class DirectModelGatewayTest {
         val target=MockWebServer(); target.start()
         try {
             server.enqueue(MockResponse().setResponseCode(307).setHeader("Location",target.url("/stolen")))
-            val c=config(ModelProtocol.OPENAI_CHAT); val error=expectFailure { gateway(c).plan(request(c)) }
+            val c=config(ModelProtocol.OPENAI_CHAT); val error=expectFailure { gateway(c).generateText(request(c)) }
             assertTrue(error.message!!.contains("重定向")); assertEquals(1,server.requestCount); assertEquals(0,target.requestCount)
         } finally { target.shutdown() }
-    }
-    @Test fun httpFailureIsOneRequestWithSafeErrorAndNoDemo()=runBlocking {
-        server.enqueue(MockResponse().setResponseCode(401).setBody("test-secret PRIVATE upstream body"))
-        val c=config(ModelProtocol.OPENAI_CHAT); val selected=SelectedModelGateway(gateway(c))
-        val error=expectFailure { selected.plan(request(c)) }
-        assertTrue(error.message!!.contains("401")); assertFalse(error.toString().contains("test-secret")); assertFalse(error.toString().contains("PRIVATE")); assertEquals(1,server.requestCount)
     }
     @Test fun malformedEmptyTruncatedAndToolResponsesAreRejectedWithoutRetry()=runBlocking {
         val c=config(ModelProtocol.OPENAI_CHAT); val g=gateway(c)
         val bad=listOf("not JSON","{}","""{"choices":[{"finish_reason":"stop","message":{"content":""}}]}""",
             """{"choices":[{"finish_reason":"length","message":{"content":"partial"}}]}""",
             """{"choices":[{"finish_reason":"stop","message":{"content":"text","tool_calls":[{"function":{"name":"shell"}}]}}]}""")
-        bad.forEachIndexed { index,text -> server.enqueue(MockResponse().setBody(text)); expectFailure { g.plan(request(c,"bad$index")) } }
+        bad.forEachIndexed { index,text -> server.enqueue(MockResponse().setBody(text)); expectFailure { g.generateText(request(c,"bad$index")) } }
         assertEquals(bad.size,server.requestCount)
     }
     @Test fun responsesAndAnthropicAndGeminiToolCallsCannotBecomeText() {
@@ -80,37 +73,37 @@ class DirectModelGatewayTest {
     }
     @Test fun cancellingCoroutineCancelsSocketRequestAndDoesNotRetry()=runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
-        val c=config(ModelProtocol.OPENAI_CHAT); val g=gateway(c); val job=async { g.plan(request(c)) }
+        val c=config(ModelProtocol.OPENAI_CHAT); val g=gateway(c); val job=async { g.generateText(request(c)) }
         assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(2,TimeUnit.SECONDS) })
         withTimeout(2_000) { job.cancelAndJoin() }; assertEquals(1,server.requestCount)
     }
     @Test fun explicitCancelStopsActiveAttempt()=runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
-        val c=config(ModelProtocol.OPENAI_CHAT); val g=gateway(c); val job=async { expectFailure { g.plan(request(c)) } }
+        val c=config(ModelProtocol.OPENAI_CHAT); val g=gateway(c); val job=async { expectFailure { g.generateText(request(c)) } }
         assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(2,TimeUnit.SECONDS) })
         g.cancel("attempt"); withTimeout(2_000) { job.await() }; assertEquals(1,server.requestCount)
     }
     @Test fun timeoutIsBoundedAndDoesNotRetry()=runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         val c=config(ModelProtocol.OPENAI_CHAT)
-        withTimeout(3_000) { expectFailure { gateway(c,150).plan(request(c)) } }; assertEquals(1,server.requestCount)
+        withTimeout(3_000) { expectFailure { gateway(c,150).generateText(request(c)) } }; assertEquals(1,server.requestCount)
     }
     @Test fun responseSizeLimitRejectsBeforeVisibleOutput()=runBlocking {
         server.enqueue(MockResponse().setBody("x".repeat(OperitModelGateway.MAX_RESPONSE_BYTES+1)))
-        val c=config(ModelProtocol.OPENAI_CHAT); val error=expectFailure { gateway(c).plan(request(c)) }
+        val c=config(ModelProtocol.OPENAI_CHAT); val error=expectFailure { gateway(c).generateText(request(c)) }
         assertTrue(error.message!!.contains("上限")); assertEquals(1,server.requestCount)
     }
     @Test fun staleFingerprintAndUnsupportedConfigurationNeverSendNetwork()=runBlocking {
         val c=config(ModelProtocol.OPENAI_CHAT); val g=gateway(c)
-        expectFailure { g.plan(request(c).copy(configuration=c.snapshot("test-model").copy(fingerprint="old"))) }
+        expectFailure { g.generateText(request(c).copy(configuration=c.snapshot("test-model").copy(fingerprint="old"))) }
         val unsupported=RpgModelConfigCodec.decode("test","""{"id":"test","apiProviderTypeId":"OPENAI_CODEX","modelName":"test-model","apiEndpoint":"https://example.com"}""")
-        expectFailure { gateway(unsupported).plan(request(unsupported)) }; assertEquals(0,server.requestCount)
+        expectFailure { gateway(unsupported).generateText(request(unsupported)) }; assertEquals(0,server.requestCount)
     }
     @Test fun blankKeyForExplicitLocalServiceDoesNotInventCredentials()=runBlocking {
         for(protocol in listOf(ModelProtocol.OPENAI_CHAT,ModelProtocol.ANTHROPIC)) {
             server.enqueue(MockResponse().setBody(response(protocol)))
             val c=config(protocol).copy(apiKey="")
-            gateway(c).plan(request(c)); val sent=server.takeRequest(); assertNull(sent.getHeader("Authorization")); assertNull(sent.getHeader("x-api-key"))
+            gateway(c).generateText(request(c)); val sent=server.takeRequest(); assertNull(sent.getHeader("Authorization")); assertNull(sent.getHeader("x-api-key"))
             if(protocol==ModelProtocol.ANTHROPIC) assertEquals("2023-06-01",sent.getHeader("anthropic-version"))
         }
     }
@@ -121,17 +114,11 @@ class DirectModelGatewayTest {
     @Test fun invalidCredentialCharactersAndReflectedCredentialsAreNotExposed()=runBlocking {
         val c=config(ModelProtocol.OPENAI_CHAT)
         val bad=c.copy(apiKey="test-secret\ninvalid")
-        val invalid=expectFailure { gateway(bad).plan(request(bad)) }
+        val invalid=expectFailure { gateway(bad).generateText(request(bad)) }
         assertFalse(invalid.toString().contains("test-secret")); assertEquals(0,server.requestCount)
         server.enqueue(MockResponse().setBody(response(ModelProtocol.OPENAI_CHAT).replace("可见正文","test-secret")))
-        val reflected=expectFailure { gateway(c).plan(request(c)) }
+        val reflected=expectFailure { gateway(c).generateText(request(c)) }
         assertFalse(reflected.toString().contains("test-secret")); assertTrue(reflected.message!!.contains("凭据")); assertEquals(1,server.requestCount)
-    }
-    @Test fun explicitlyReconfiguredProviderNamedDemoIsNeverSilentlyTheFakeGateway()=runBlocking {
-        server.enqueue(MockResponse().setBody(response(ModelProtocol.OPENAI_CHAT)))
-        val c=config(ModelProtocol.OPENAI_CHAT).copy(providerId="DEMO")
-        assertEquals("可见正文",SelectedModelGateway(gateway(c)).plan(request(c)).text)
-        assertEquals(1,server.requestCount)
     }
     @Test fun budgetDropsOldestHistoryAndPreservesRequiredState() {
         val original=buildJsonObject { put("input","当前问题"); put("state","必要状态"); put("mechanicalResult","已提交骰点30"); put("history",buildJsonArray { add("旧".repeat(9_000)); add("最新历史") }) }

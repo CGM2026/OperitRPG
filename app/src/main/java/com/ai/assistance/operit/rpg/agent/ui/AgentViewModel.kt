@@ -14,12 +14,8 @@ import com.ai.assistance.operit.rpg.agent.engine.AgentCoordinator
 import com.ai.assistance.operit.rpg.agent.engine.DemoTextModelPort
 import com.ai.assistance.operit.rpg.agent.memory.PublicProjection
 import com.ai.assistance.operit.rpg.agent.module.ModuleZipImporter
-import com.ai.assistance.operit.rpg.agent.module.ModuleValidator
 import com.ai.assistance.operit.rpg.agent.module.ExampleModules
-import com.ai.assistance.operit.rpg.data.RpgDatabase
 import com.ai.assistance.operit.rpg.model.AgentTextModelPort
-import com.ai.assistance.operit.rpg.model.AgentDraftService
-import com.ai.assistance.operit.rpg.model.DraftDocument
 import com.ai.assistance.operit.rpg.model.RpgModelConfigStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -29,9 +25,9 @@ import java.security.SecureRandom
 import java.util.UUID
 
 @Composable
-fun D20AgentRoute(onOpenLegacy: (String?) -> Unit, onModelSettings: () -> Unit) {
+fun D20AgentRoute(onModelSettings: () -> Unit) {
     val controller: AgentViewModel = viewModel()
-    AgentScreen(controller, onOpenLegacy, onModelSettings)
+    AgentScreen(controller, onModelSettings)
 }
 
 /** Keeps Android documents and jobs out of the composables. All disk work runs on IO. */
@@ -57,9 +53,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     private var pendingModule: ValidatedModule? = null
     private var pendingDocument: Pair<String, String>? = null
     private var pendingBackup: File? = null
-    private var validatedDraft: ValidatedModule? = null
     private val importer = ModuleZipImporter()
-    private val draftFile = File(app.filesDir, "rpg-agent-module-draft.json")
     private val exampleModules by lazy { ExampleModules.all() }
     private val random = SecureRandom()
 
@@ -248,29 +242,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         val text = chain.joinToString("\n\n") { "${if (it.status == "ACTIVE") "当前内容" else "先前内容"}\n${it.text}\n${if (it.kind == "CONVERSATION") "对话回合" else "来源事件 ${it.fromSeq}–${it.toSeq}"}" }
         mutable.update { it.copy(documentText = "更正记录" to text) }
     }
-    override fun organize(documentIds: List<String>, modelId: String, callLimit: Int) = execute("模型正在整理草稿") {
-        require(callLimit in 1..4 && documentIds.isNotEmpty())
-        val model = modelOption(modelId)
-        require(model.fingerprint != DEMO_FINGERPRINT) { "REAL_MODEL_REQUIRED_FOR_DRAFT" }
-        val port = AgentTextModelPort(app, model.fingerprint); activePorts = listOf(port)
-        val selected = documentIds.map { id -> val doc = documents.list().single { it.id == id }; DraftDocument(doc.id, doc.title, documents.read(id)) }
-        require(selected.sumOf { it.text.length + it.title.length } <= 6000) { "DRAFT_SOURCE_TOO_LARGE" }
-        val result = AgentDraftService(port).organize(selected, callLimit)
-        validateDraftContent(result)
-    }
-    override fun validateDraft(json: String) = execute("校验草稿") { validateDraftContent(json) }
-    private fun validateDraftContent(content: String) {
-        require(content.toByteArray(Charsets.UTF_8).size <= 300 * 1024) { "DRAFT_TOO_LARGE" }
-        draftFile.writeText(content, Charsets.UTF_8)
-        validatedDraft = null
-        val issues = try { validatedDraft = ModuleValidator.validateDraft(content); emptyList() } catch (e: Exception) {
-            val detail = if (e is kotlinx.serialization.SerializationException) e.message?.substringBefore("JSON input:")?.take(600).orEmpty() else safeValidationMessage(e)
-            listOf("草稿尚不能激活：$detail")
-        }
-        mutable.update { it.copy(draft = AgentDraftUi(validatedDraft?.manifest?.title ?: "模组草稿", content, issues)) }
-    }
-    override fun activateDraft() = execute("激活模组") { catalog.install(requireNotNull(validatedDraft)); draftFile.delete(); validatedDraft = null; mutable.update { it.copy(draft = null, message = "模组已激活，可用于新建战役。") } }
-    override fun reopenDraft() = execute("读取草稿") { validateDraftContent(draftFile.readText(Charsets.UTF_8)) }
     override fun readDocument(id: String) = execute("读取原文") {
         val doc = documents.list().single { it.id == id }; mutable.update { it.copy(documentText = doc.title to documents.read(id)) }
     }
@@ -281,7 +252,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         message("所选原文已添加为本团参考资料，不改变已采用的可执行规则。")
     }
     override fun dismissDocument() { mutable.update { it.copy(documentText = null) } }
-    override fun dismissDraft() { mutable.update { it.copy(draft = null) } }
     override fun dismissMessage() { mutable.update { it.copy(message = null) } }
     private suspend fun modelOption(id: String): AgentModelOption = modelOptions().single { it.id == id }
     private suspend fun modelOptions(): List<AgentModelOption> = listOf(AgentModelOption("offline-demo", "离线流程演示 · 固定脚本，不调用云端模型", DEMO_FINGERPRINT)) + modelConfigs.list().flatMap { config ->
@@ -289,11 +259,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     }
     private fun current() = requireNotNull(store.loadCampaign(requireNotNull(selectedId) { "CAMPAIGN_NOT_SELECTED" }))
     private suspend fun load() {
-        val legacy = RpgDatabase.get(app).campaigns().headers(entryLimit, 0).map { AgentEntry(CampaignRef("legacy-rainydock-v1", it.id), it.title, it.updatedAt) }
         val newer = mutableListOf<CampaignHeader>()
         var offset = 0
         while (offset < entryLimit) { val batch = store.listCampaigns(offset, minOf(500, entryLimit - offset)); newer += batch; if (batch.isEmpty()) break; offset += batch.size }
-        val entries = newer.map { AgentEntry(it.ref, it.title, it.updatedAt) } + legacy
+        val entries = newer.map { AgentEntry(it.ref, it.title, it.updatedAt) }
         val selectedAtLoad = selectedId
         val c = selectedAtLoad?.let(store::loadCampaign)
         val play = c?.let { campaign ->
@@ -315,7 +284,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         val modules = catalog.list().map(::moduleOption)
         val referenceDocuments = documents.list().map { d -> AgentDocumentUi(d.id, d.title) }
         val samples = exampleModules.map(::moduleOption)
-        mutable.update { if (selectedAtLoad != selectedId) it else it.copy(entries = entries.sortedByDescending { e -> e.updatedAt }, hasMoreEntries = newer.size == entryLimit || legacy.size == entryLimit, modules = modules, models = models, documents = referenceDocuments, play = play, hasSavedDraft = draftFile.isFile, sampleModules = samples,
+        mutable.update { if (selectedAtLoad != selectedId) it else it.copy(entries = entries.sortedByDescending { e -> e.updatedAt }, hasMoreEntries = newer.size == entryLimit, modules = modules, models = models, documents = referenceDocuments, play = play, sampleModules = samples,
             progress = if (it.busy) play?.turns?.lastOrNull()?.stage?.takeIf { text -> text.isNotBlank() } ?: it.progress else null) }
     }
     private fun adaptTurn(t: Turn): AgentTurnUi = AgentTurnUi(t.id, t.playerText, t.narration.orEmpty(), stageText(t), t.result?.let { r ->
@@ -354,7 +323,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     }
     private suspend fun safely(block: suspend () -> Unit) { try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { message(safeValidationMessage(e)) } }
     private fun safeValidationMessage(e: Exception): String = when {
-        e.message == "DRAFT_SOURCE_TOO_LARGE" -> "一次整理的资料与标题合计上限为 6000 字。请将需要的章节或节选保存为 MD/TXT 后导入，再明确整理。"
         e.message == "FINISH_OR_CANCEL_PENDING_TURN" -> "本团有中断回合，请先继续完成或取消，再导出备份。"
         e.message == "TURN_PENDING" -> "请先继续完成或取消当前回合，再更换模型。"
         e.message == "MODULE_HASH_MISMATCH" || e.message == "MODULE_VERSION_CONFLICT" -> "模组内容摘要或已安装版本冲突，请检查文件。原版本保留。"

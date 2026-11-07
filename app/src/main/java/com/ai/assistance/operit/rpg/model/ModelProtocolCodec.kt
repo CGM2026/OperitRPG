@@ -1,21 +1,8 @@
 package com.ai.assistance.operit.rpg.model
 
-import com.ai.assistance.operit.rpg.core.ModelReply
-import com.ai.assistance.operit.rpg.core.Usage
 import kotlinx.serialization.json.*
-import kotlin.math.ceil
 
 object ModelProtocolCodec {
-    fun budget(system: String, user: String): String {
-        var context = Json.parseToJsonElement(user).jsonObject
-        fun estimate(text: String): Int = ceil(text.sumOf { if (it.code in 0x4E00..0x9FFF) 1.5 else 0.5 }).toInt()
-        while (estimate(system + context) > 12_000) {
-            val history = context["history"]?.jsonArray ?: throw ModelRequestException("必要上下文超过上限")
-            require(history.isNotEmpty()) { "本轮必要上下文超过上限，请缩短输入" }
-            context = JsonObject(context + ("history" to JsonArray(history.drop(1))))
-        }
-        return context.toString()
-    }
     fun request(protocol: ModelProtocol, model: String, system: String, user: String, maxTokens: Int): JsonObject = buildJsonObject {
         when (protocol) {
             ModelProtocol.OPENAI_CHAT -> {

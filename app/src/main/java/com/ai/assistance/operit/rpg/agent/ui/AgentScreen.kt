@@ -30,7 +30,7 @@ private val agentColors = lightColorScheme(primary = Color(0xFF586B62), onPrimar
 /** Receives presentation values only. GM plans and tool output never enter this screen. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, onModelSettings: () -> Unit) {
+fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
     val state by controller.state.collectAsState()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
@@ -79,12 +79,11 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                     "home" -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         item { Text("一个人，也能走进故事。", style = MaterialTheme.typography.bodyMedium) }
                         item { Button(onClick = { page = "create" }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) { Text("新建战役") } }
-                        item { TextButton(onClick = { onOpenLegacy(null) }) { Text("旧版内置模组开团") } }
                         items(state.entries, key = { "${it.ref.engineId}:${it.ref.campaignId}" }) { entry ->
-                            OutlinedCard(onClick = { if (entry.ref.engineId == LONGFORM_ENGINE) controller.open(entry.ref.campaignId) else onOpenLegacy(entry.ref.campaignId) }, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedCard(onClick = { controller.open(entry.ref.campaignId) }, modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(entry.title, style = MaterialTheme.typography.titleMedium)
-                                    Text(if (entry.ref.engineId == LONGFORM_ENGINE) "长团 Agent" else "旧战役 · 沿用原版规则", style = MaterialTheme.typography.bodySmall)
+                                    Text("长团 Agent", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
@@ -95,11 +94,10 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                         OutlinedButton(onClick = { page = "library" }, Modifier.fillMaxWidth()) { Text("模组与资料") }
                         OutlinedButton(onClick = onModelSettings, Modifier.fillMaxWidth()) { Text("模型配置") }
                         OutlinedButton(onClick = { backupImporter.launch(arrayOf("application/zip", "application/octet-stream")) }, Modifier.fillMaxWidth(), enabled = !state.busy) { Text("导入长团备份") }
-                        TextButton(onClick = { onOpenLegacy(null) }) { Text("旧版战役与 format1 备份") }
                         RpgUpdateButton(Modifier.fillMaxWidth())
                         Text("二十面骰 0.3 · 测试版", style = MaterialTheme.typography.bodySmall)
                     }
-                    "library" -> AgentLibrary(state, controller, { importer.launch(arrayOf("application/zip", "application/octet-stream", "text/*")) }, onModelSettings)
+                    "library" -> AgentLibrary(state, controller, { importer.launch(arrayOf("application/zip", "application/octet-stream", "text/*")) })
                     "create" -> AgentCreate(state, controller, { page = "library" }, onModelSettings, ::dismissKeyboard)
                     "play" -> if (play != null) {
                         Text("${play.location} · ${play.status}", Modifier.padding(horizontal = 28.dp), style = MaterialTheme.typography.bodySmall)
@@ -204,7 +202,6 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
             }, confirmButton = { TextButton(onClick = { dismissKeyboard(); controller.correctNote(original.id, correction); correcting = null }, enabled = correction.isNotBlank() && correction != original.text && !state.busy) { Text("确认更正") } }, dismissButton = { TextButton(onClick = { correcting = null }) { Text("取消") } }) }
             state.preview?.let { preview -> AlertDialog(onDismissRequest = controller::dismissPreview, title = { Text(preview.title) }, text = { Text(preview.detail, Modifier.verticalScroll(rememberScrollState())) },
                 confirmButton = { TextButton(onClick = controller::commitImport, enabled = !state.busy) { Text(if (preview.module) "确认安装" else "保存参考资料") } }, dismissButton = { TextButton(onClick = controller::dismissPreview) { Text("取消") } }) }
-            state.draft?.let { draft -> AgentDraftDialog(draft, state.busy, controller) }
             state.documentText?.let { (title, text) -> AlertDialog(onDismissRequest = controller::dismissDocument, title = { Text(title) }, text = { Text(text, Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = controller::dismissDocument, modifier = Modifier.semantics { contentDescription = "关闭$title" }) { Text("关闭") } }) }
         }
     }
@@ -246,44 +243,20 @@ private fun authorityText(value: String) = when (value) { "temporary", "house_ru
     }
 }
 
-@Composable private fun AgentLibrary(state: AgentUiState, controller: AgentUiController, onImport: () -> Unit, onModels: () -> Unit) {
+@Composable private fun AgentLibrary(state: AgentUiState, controller: AgentUiController, onImport: () -> Unit) {
     var selected by remember { mutableStateOf(setOf<String>()) }
-    var modelId by rememberSaveable { mutableStateOf<String?>(null) }
-    var budget by rememberSaveable { mutableStateOf("1") }
     var targetCampaignId by rememberSaveable { mutableStateOf(state.play?.id) }
-    var organizeConfirm by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Button(onClick = onImport, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导入模组 / MD / TXT") } }
         items(state.modules, key = { it.ref.hash }) { module -> Detail(module.title, "${module.ref.version} · 可用于开团\n${module.description}") }
         item { Text("示例模组", style = MaterialTheme.typography.titleMedium) }
         items(state.sampleModules, key = { "sample:${it.ref.hash}" }) { module -> OutlinedButton(onClick = { controller.previewExample(module.ref.hash) }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) { Text("查看并安装 · ${module.title}") } }
-        item { Text("参考资料", style = MaterialTheme.typography.titleMedium); Text("原文可作为资料保存。选中后，可主动调用模型整理为待审草稿。", style = MaterialTheme.typography.bodySmall) }
+        item { Text("参考资料", style = MaterialTheme.typography.titleMedium); Text("原文可作为资料保存。选中后可添加为战役参考资料。", style = MaterialTheme.typography.bodySmall) }
         items(state.documents, key = { it.id }) { document -> Row { Checkbox(document.id in selected, { checked -> selected = if (checked) selected + document.id else selected - document.id }); TextButton(onClick = { controller.readDocument(document.id) }) { Text(document.title) } } }
-        if (state.hasSavedDraft) item { OutlinedButton(onClick = controller::reopenDraft, modifier = Modifier.fillMaxWidth()) { Text("继续审校已有草稿") } }
         if (selected.isNotEmpty()) item { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("添加为战役参考资料", style = MaterialTheme.typography.titleMedium)
             state.entries.filter { it.ref.engineId == LONGFORM_ENGINE }.forEach { entry -> OutlinedButton(onClick = { targetCampaignId = entry.ref.campaignId }, modifier = Modifier.fillMaxWidth()) { Text(entry.title + if (targetCampaignId == entry.ref.campaignId) " ✓" else "") } }
             Button(onClick = { controller.attachDocuments(requireNotNull(targetCampaignId), selected.toList()) }, enabled = !state.busy && targetCampaignId != null, modifier = Modifier.fillMaxWidth()) { Text("添加所选资料") }
         } }
-        item { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            state.models.filter { it.id != "offline-demo" }.forEach { model -> OutlinedButton(onClick = { modelId = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (modelId == model.id) " ✓" else "") } }
-            TextButton(onClick = onModels) { Text("模型配置") }
-            OutlinedTextField(budget, { budget = it }, label = { Text("整理调用次数上限（1–4）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { organizeConfirm = true }, enabled = !state.busy && selected.isNotEmpty() && state.models.any { it.id == modelId } && budget.toIntOrNull()?.let { it in 1..4 } == true, modifier = Modifier.fillMaxWidth()) { Text("整理为模组草稿") }
-        } }
     }
-    if (organizeConfirm) AlertDialog(onDismissRequest = { organizeConfirm = false }, title = { Text("发送所选资料给模型") }, text = { Text("将发送 ${selected.size} 份资料，调用所选模型，最多 ${budget} 次。生成内容先保存为草稿，检查来源与缺项并确认后才能激活。") },
-        confirmButton = { TextButton(onClick = { organizeConfirm = false; controller.organize(selected.toList(), requireNotNull(modelId), budget.toInt()) }) { Text("开始整理") } }, dismissButton = { TextButton(onClick = { organizeConfirm = false }) { Text("取消") } })
-}
-
-@Composable private fun AgentDraftDialog(draft: AgentDraftUi, busy: Boolean, controller: AgentUiController) {
-    var json by remember(draft.json) { mutableStateOf(draft.json) }
-    AlertDialog(onDismissRequest = controller::dismissDraft, title = { Text(draft.title) }, text = {
-        Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("检查来源与模型建议，修改缺项后重新校验。")
-            draft.issues.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
-            OutlinedTextField(json, { json = it }, label = { Text("模组草稿 JSON") }, modifier = Modifier.fillMaxWidth(), minLines = 8)
-            TextButton(onClick = { controller.validateDraft(json) }, enabled = !busy) { Text("校验修改") }
-        }
-    }, confirmButton = { TextButton(onClick = controller::activateDraft, enabled = !busy && draft.issues.isEmpty() && json == draft.json) { Text("确认激活") } }, dismissButton = { TextButton(onClick = controller::dismissDraft) { Text("保留草稿并关闭") } })
 }

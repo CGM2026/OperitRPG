@@ -5,7 +5,6 @@ import com.ai.assistance.operit.rpg.agent.contract.ContextPacket
 import com.ai.assistance.operit.rpg.agent.contract.TextModelPort
 import com.ai.assistance.operit.rpg.agent.contract.TextModelReply
 import com.ai.assistance.operit.rpg.agent.contract.Usage
-import com.ai.assistance.operit.rpg.core.ModelRequest
 import okhttp3.OkHttpClient
 
 /** Binds one explicitly selected local configuration; never discovers keys outside this app. */

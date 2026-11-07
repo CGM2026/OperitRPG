@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :rpg-core:test :rpg-agent:test :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease \
+          ./gradlew :rpg-agent:test :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease \
             -PrpgVersionName="$RPG_VERSION" -PrpgVersionCode="$RPG_CODE" \
             --max-workers=2 --no-parallel --stacktrace --no-daemon
 
@@ -247,8 +247,6 @@ jobs:
           path: |
             app/build/reports/**
             app/build/test-results/**
-            rpg-core/build/reports/**
-            rpg-core/build/test-results/**
             rpg-agent/build/reports/**
             rpg-agent/build/test-results/**
             app/schemas/**
