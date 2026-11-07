@@ -19,10 +19,12 @@ import com.ai.assistance.operit.rpg.agent.engine.DemoTextModelPort
 import com.ai.assistance.operit.rpg.agent.memory.PublicProjection
 import com.ai.assistance.operit.rpg.agent.module.ModuleZipImporter
 import com.ai.assistance.operit.rpg.agent.module.ExampleModules
+import com.ai.assistance.operit.rpg.agent.rules.Chapters
 import com.ai.assistance.operit.rpg.domain.CampaignShelf
 import com.ai.assistance.operit.rpg.model.AgentTextModelPort
 import com.ai.assistance.operit.rpg.model.RpgModelConfigStore
 import com.ai.assistance.operit.rpg.ui.home.HomeScreen
+import com.ai.assistance.operit.rpg.ui.play.ChapterSummaries
 import com.ai.assistance.operit.rpg.ui.play.projectCharacterSheet
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -104,6 +106,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     private val importer = ModuleZipImporter()
     private val exampleModules by lazy { ExampleModules.all() }
     private val random = SecureRandom()
+    /** Chapters whose summary was already requested; failures stay here so only an explicit retry calls the model again. */
+    private val chapterSummaryRuns = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val chapterSummaryRequests = java.util.concurrent.ConcurrentHashMap<String, ChapterSummaries.Request>()
 
     init {
         viewModelScope.launch {
@@ -117,9 +122,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         viewModelScope.launch { modelConfigs.configurations.collect { refresh() } }
     }
     private fun coordinator(c: Campaign): AgentCoordinator = coordinator(c.modelFingerprint, c.narratorFingerprint, c.module)
+    private fun textModelPort(fingerprint: String, module: VersionRef): TextModelPort = if (fingerprint == DEMO_FINGERPRINT) DemoTextModelPort(catalog.get(module)) else AgentTextModelPort(app, fingerprint)
     private fun coordinator(plannerFingerprint: String, narratorFingerprint: String, module: VersionRef): AgentCoordinator {
-        fun port(fingerprint: String): TextModelPort = if (fingerprint == DEMO_FINGERPRINT) DemoTextModelPort(catalog.get(module)) else AgentTextModelPort(app, fingerprint)
-        val planner = port(plannerFingerprint); val narrator = port(narratorFingerprint)
+        val planner = textModelPort(plannerFingerprint, module); val narrator = textModelPort(narratorFingerprint, module)
         activePorts = listOf(planner, narrator)
         return AgentCoordinator(store, catalog, rules, memories, planner, narrator, DiceSource { sides -> random.nextInt(sides) + 1 }, Clock { System.currentTimeMillis() })
     }
@@ -313,6 +318,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         val entries = newer.map { AgentEntry(it.ref, it.title, it.updatedAt) }
         val selectedAtLoad = selectedId
         val c = selectedAtLoad?.let(store::loadCampaign)
+        var advancing: Triple<Campaign, ValidatedModule, Turn>? = null
         val play = c?.let { campaign ->
             val module = catalog.get(campaign.module); val public = PublicProjection.campaign(campaign, module)
             val latest = store.history(campaign.id, null, 30)
@@ -326,12 +332,18 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             val d20Rules = module.rules.d20
             val d20State = campaign.world.d20
             val sheet = if (player != null && d20Rules != null && d20State != null) projectCharacterSheet(player, d20Rules, d20State, public.gameTime, module.rules.timeUnit, public.items, public.facts, public.objectives) else null
+            val summaryItems = memories.list(RoleContext(campaign.id, Audience.PUBLIC), null, 500).filter { it.kind == Chapters.SUMMARY_KIND && it.status == "ACTIVE" }
+            val currentOrdinal = module.rules.chapters.indexOfFirst { it.id == campaign.chapterId } + 1
+            val archive = module.rules.chapters.take(currentOrdinal).mapIndexed { index, chapter ->
+                AgentChapterUi(chapter.id, chapter.title, index + 1, summaryItems.lastOrNull { it.entityIds.contains(chapter.id) }?.text)
+            }
+            history.lastOrNull { it.result?.chapters?.isNotEmpty() == true }?.let { turn -> advancing = Triple(campaign, module, turn) }
             AgentPlayUi(campaign.id, public.title, public.location.title,
                 public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", clockText(module.world.clock, public.gameTime), campaign.modelFingerprint, campaign.narratorFingerprint,
                 module.rules.contentLevels.let { levels -> if (levels.isEmpty()) null else levels[campaign.contentLevel].label + if (campaign.sceneHold) " · 将收束场景" else "" },
                 history.map(::adaptTurn), public.npcs.map { AgentPerson(it.id, it.name, if (it.status == "idle") "在场" else it.status) }, places.map { AgentPerson(it.id, it.title, it.description) },
                 public.facts.map { it.text }, public.objectives.map { "${it.title} · ${when (it.status) { "active" -> "进行中"; "complete" -> "已完成"; else -> it.status }}" }, pending == null, olderPages[campaign.id] == true,
-                player?.id, sheet)
+                player?.id, sheet, Chapters.currentTitle(campaign, module.rules), archive)
         }
         val models = modelOptions()
         val modules = catalog.list().map(::moduleOption)
@@ -339,6 +351,87 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         val samples = exampleModules.map(::moduleOption)
         mutable.update { if (selectedAtLoad != selectedId) it else it.copy(entries = entries.sortedByDescending { e -> e.updatedAt }, hasMoreEntries = newer.size == entryLimit, modules = modules, models = models, documents = referenceDocuments, play = play, sampleModules = samples,
             progress = if (it.busy) play?.turns?.lastOrNull()?.stage?.takeIf { text -> text.isNotBlank() } ?: it.progress else null) }
+        if (advancing != null && !mutable.value.busy) {
+            val (campaign, module, turn) = requireNotNull(advancing)
+            scheduleChapterSummary(campaign, module, turn)
+        }
+    }
+    /** Starts one summary run for the chapter the advancing turn just left; the run set blocks automatic retries. */
+    private fun scheduleChapterSummary(campaign: Campaign, module: ValidatedModule, turn: Turn) {
+        val firstMark = turn.result?.chapters?.firstOrNull() ?: return
+        if (firstMark.ordinal <= 1) return
+        val previous = module.rules.chapters.getOrNull(firstMark.ordinal - 2) ?: return
+        if (!chapterSummaryRuns.add(previous.id)) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val role = RoleContext(campaign.id, Audience.PUBLIC)
+                    val existing = memories.list(role, null, 500).any { it.kind == Chapters.SUMMARY_KIND && it.entityIds.contains(previous.id) }
+                    if (!existing) {
+                        val request = chapterSummaryRequest(campaign, module, requireNotNull(turn.result), previous)
+                        if (request != null) {
+                            chapterSummaryRequests[turn.id] = request
+                            runChapterSummary(turn.id, request, campaign)
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { recordChapterSummaryFailure(turn.id) }
+            }
+        }
+    }
+    override fun retryChapterSummary(turnId: String) {
+        val request = chapterSummaryRequests[turnId] ?: return
+        chapterSummaryRuns.remove(request.chapterId)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                if (!chapterSummaryRuns.add(request.chapterId)) return@withContext
+                try {
+                    val campaign = requireNotNull(store.loadCampaign(request.campaignId)) { "CAMPAIGN_NOT_FOUND" }
+                    runChapterSummary(turnId, request, campaign)
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { recordChapterSummaryFailure(turnId) }
+            }
+        }
+    }
+    private suspend fun runChapterSummary(turnId: String, request: ChapterSummaries.Request, campaign: Campaign) {
+        ChapterSummaries.generate(request, textModelPort(campaign.narratorFingerprint, campaign.module), memories)
+        chapterSummaryRequests.remove(turnId)
+        mutable.update { it.copy(chapterSummaryErrors = it.chapterSummaryErrors - turnId) }
+        load()
+    }
+    private fun recordChapterSummaryFailure(turnId: String) {
+        mutable.update { it.copy(chapterSummaryErrors = it.chapterSummaryErrors + (turnId to "上一章摘要生成失败，可重试。")) }
+    }
+    private fun chapterSummaryRequest(campaign: Campaign, module: ValidatedModule, result: CommittedResult, previous: ChapterDefinition): ChapterSummaries.Request? {
+        val toSeq = result.eventSeq - 1
+        if (toSeq < 1) return null
+        val fromSeq = if (previous.id == module.rules.chapters.first().id) 1L else chapterStartSeq(campaign.id, previous.id, toSeq)
+        if (fromSeq > toSeq) return null
+        val narrations = chapterNarrations(campaign.id, fromSeq, toSeq)
+        if (narrations.isEmpty()) return null
+        return ChapterSummaries.Request(campaign.id, previous.id, fromSeq, toSeq, narrations)
+    }
+    /** Event seq where [chapterId] was entered; earlier chapters stay at their recorded mark. */
+    private fun chapterStartSeq(campaignId: String, chapterId: String, upTo: Long): Long {
+        var after = 0L
+        while (after < upTo) {
+            val batch = store.events(campaignId, after, 500).takeWhile { it.seq <= upTo }
+            if (batch.isEmpty()) break
+            batch.firstOrNull { event -> event.chapters.any { it.chapterId == chapterId } }?.let { return it.seq }
+            after = batch.last().seq
+        }
+        error("CHAPTER_START_NOT_FOUND")
+    }
+    private fun chapterNarrations(campaignId: String, fromSeq: Long, toSeq: Long): List<String> {
+        val turnIds = linkedSetOf<String>()
+        var after = fromSeq - 1
+        while (after < toSeq) {
+            val batch = store.events(campaignId, after, 500).takeWhile { it.seq <= toSeq }
+            if (batch.isEmpty()) break
+            batch.forEach { turnIds += it.turnId }
+            after = batch.last().seq
+        }
+        return turnIds.mapNotNull { store.loadTurn(campaignId, it) }.sortedBy { it.ordinal }.mapNotNull { turn -> turn.narration?.takeIf { it.isNotBlank() } }
     }
     private fun adaptTurn(t: Turn): AgentTurnUi = AgentTurnUi(t.id, t.playerText, t.narration.orEmpty(), stageText(t), t.result?.let { r ->
         r.publicSummary + (r.dice?.let { "\nd100：${it.value} / ${it.threshold} · ${if (r.success) "成功" else "失败"}" } ?: "") + r.notices.joinToString("") { "\n征兆：$it" }
@@ -346,7 +439,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         t.error?.let { if (t.result != null) "结果已保存，叙述未完成。继续不会重新结算。" else errorText(it) },
         t.phase !in terminal && t.phase != TurnPhase.AWAITING_CONFIRMATION,
         t.phase !in terminal && t.result == null, PublicProjection.evidence(t.result?.evidence ?: t.plan?.evidence.orEmpty()),
-        t.result?.rolls.orEmpty().map { RollUi(it.purpose, it.expression, it.faces, it.modifier, it.total, it.target, it.success) })
+        t.result?.rolls.orEmpty().map { RollUi(it.purpose, it.expression, it.faces, it.modifier, it.total, it.target, it.success) },
+        t.result?.chapters.orEmpty())
     private fun stageText(t: Turn) = when (t.phase) {
         TurnPhase.RECEIVED -> "收到行动"
         TurnPhase.GATHERING -> if (t.tools.isEmpty()) "正在理解行动" else "已核对 ${t.tools.size} 项资料，正在规划"

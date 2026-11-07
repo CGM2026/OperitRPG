@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -120,7 +121,7 @@ fun PlayScreen(
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                 Text(play.title, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                 Text(
-                    listOfNotNull(play.clock.takeIf { it.isNotBlank() }, play.location).joinToString(" · "),
+                    listOfNotNull(play.currentChapter, play.clock.takeIf { it.isNotBlank() }, play.location).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -148,6 +149,7 @@ fun PlayScreen(
                     busy = state.busy,
                     isLast = turn.id == lastTurn?.id,
                     controller = controller,
+                    summaryError = state.chapterSummaryErrors[turn.id],
                 )
             }
             items(state.notices) { notice ->
@@ -242,6 +244,15 @@ fun PlayScreen(
                                 }
                             }
                         }
+                        "chapters" -> {
+                            if (play.chapterArchive.isEmpty()) Text("本模组未声明章节。")
+                            play.chapterArchive.forEach { chapter ->
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("第 ${chapter.ordinal} 章 · ${chapter.title}", style = MaterialTheme.typography.titleMedium)
+                                    Text(chapter.summary ?: "本章摘要尚未生成。", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
                         "documents" -> {
                             if (state.documents.isEmpty()) Text("还没有参考资料。")
                             state.documents.forEach { document ->
@@ -265,6 +276,7 @@ fun PlayScreen(
                         }
                         else -> {
                             MenuRow("模型绑定") { menuPage = "models" }
+                            MenuRow("章节") { menuPage = "chapters" }
                             MenuRow("记事修订") { controller.loadNotes(); menuPage = "notes" }
                             MenuRow("参考资料") { menuPage = "documents" }
                             MenuRow("备份") { menuPage = "backup" }
@@ -299,7 +311,7 @@ fun PlayScreen(
 }
 
 @Composable
-private fun TurnBlock(turn: AgentTurnUi, busy: Boolean, isLast: Boolean, controller: AgentUiController) {
+private fun TurnBlock(turn: AgentTurnUi, busy: Boolean, isLast: Boolean, controller: AgentUiController, summaryError: String?) {
     val inProgress = busy && isLast && turn.canResume
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (turn.input.isNotBlank()) {
@@ -315,6 +327,16 @@ private fun TurnBlock(turn: AgentTurnUi, busy: Boolean, isLast: Boolean, control
                     }
                 }
             }
+        }
+        turn.chapters.forEach { chapter ->
+            HorizontalDivider()
+            Text(
+                "第 ${chapter.ordinal} 章 · ${chapter.title} · 已存档",
+                Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.Center,
+            )
         }
         if (turn.narration.isNotBlank()) {
             Text(
@@ -338,6 +360,12 @@ private fun TurnBlock(turn: AgentTurnUi, busy: Boolean, isLast: Boolean, control
                 if (turn.canCancel) TextButton(onClick = { controller.cancel(turn.id) }, enabled = !busy) { Text("取消") }
             }
         }
+        summaryError?.let { error ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { controller.retryChapterSummary(turn.id) }, enabled = !busy) { Text("重试摘要") }
+            }
+        }
     }
 }
 
@@ -352,6 +380,7 @@ private fun MenuRow(text: String, onClick: () -> Unit) {
 
 private fun menuTitle(page: String) = when (page) {
     "models" -> "模型绑定"
+    "chapters" -> "章节"
     "notes" -> "记事修订"
     "documents" -> "参考资料"
     "backup" -> "备份"

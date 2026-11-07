@@ -48,11 +48,15 @@ data class CharacterSheetUi(
 
 data class AgentTurnUi(val id: String, val input: String, val narration: String, val stage: String,
     val result: String?, val confirmation: String?, val error: String?, val canResume: Boolean,
-    val canCancel: Boolean, val evidence: List<RuleEvidence>, val rolls: List<RollUi>)
+    val canCancel: Boolean, val evidence: List<RuleEvidence>, val rolls: List<RollUi>,
+    val chapters: List<ChapterMark> = emptyList())
+/** One reached chapter and the generated recap; the current chapter has no summary until play leaves it. */
+data class AgentChapterUi(val id: String, val title: String, val ordinal: Int, val summary: String?)
 data class AgentPlayUi(val id: String, val title: String, val location: String, val status: String, val clock: String,
     val modelFingerprint: String, val narratorFingerprint: String, val contentLevelLabel: String?, val turns: List<AgentTurnUi>, val people: List<AgentPerson>,
     val places: List<AgentPerson>, val facts: List<String>, val objectives: List<String>,
-    val canAct: Boolean, val hasOlderTurns: Boolean, val playerCharacterId: String?, val sheet: CharacterSheetUi?)
+    val canAct: Boolean, val hasOlderTurns: Boolean, val playerCharacterId: String?, val sheet: CharacterSheetUi?,
+    val currentChapter: String? = null, val chapterArchive: List<AgentChapterUi> = emptyList())
 data class AgentDocumentUi(val id: String, val title: String)
 data class AgentImportUi(val title: String, val detail: String, val module: Boolean)
 data class AgentUiState(val entries: List<AgentEntry> = emptyList(), val modules: List<AgentModuleOption> = emptyList(),
@@ -63,7 +67,9 @@ data class AgentUiState(val entries: List<AgentEntry> = emptyList(), val modules
     val documentText: Pair<String, String>? = null,
     val sampleModules: List<AgentModuleOption> = emptyList(),
     /** Local replies to `//` table commands; shown in the conversation flow, never stored in the event stream. */
-    val notices: List<String> = emptyList())
+    val notices: List<String> = emptyList(),
+    /** Chapter-summary failures keyed by the turn that entered the new chapter; retried only on explicit user action. */
+    val chapterSummaryErrors: Map<String, String> = emptyMap())
 
 interface AgentUiController {
     val state: StateFlow<AgentUiState>
@@ -95,4 +101,5 @@ interface AgentUiController {
     fun attachDocuments(campaignId: String, documentIds: List<String>)
     fun dismissDocument()
     fun dismissMessage()
+    fun retryChapterSummary(turnId: String)
 }
