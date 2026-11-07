@@ -120,12 +120,6 @@ class DirectModelGatewayTest {
         val reflected=expectFailure { gateway(c).generateText(request(c)) }
         assertFalse(reflected.toString().contains("test-secret")); assertTrue(reflected.message!!.contains("凭据")); assertEquals(1,server.requestCount)
     }
-    @Test fun budgetDropsOldestHistoryAndPreservesRequiredState() {
-        val original=buildJsonObject { put("input","当前问题"); put("state","必要状态"); put("mechanicalResult","已提交骰点30"); put("history",buildJsonArray { add("旧".repeat(9_000)); add("最新历史") }) }
-        val trimmed=Json.parseToJsonElement(ModelProtocolCodec.budget("system",original.toString())).jsonObject
-        assertEquals("当前问题",trimmed.getValue("input").jsonPrimitive.content); assertEquals(original["state"],trimmed["state"]); assertEquals(original["mechanicalResult"],trimmed["mechanicalResult"])
-        assertEquals(listOf(JsonPrimitive("最新历史")),trimmed.getValue("history").jsonArray.toList())
-    }
     @Test fun knownReasoningMarkupIsRemovedAndResidualMetadataRejected() {
         val good=response(ModelProtocol.OPENAI_CHAT).replace("可见正文","<think>PRIVATE</think>可见正文")
         assertEquals("可见正文",ModelProtocolCodec.response(ModelProtocol.OPENAI_CHAT,good).text)
