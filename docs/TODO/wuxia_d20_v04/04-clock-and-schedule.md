@@ -84,3 +84,12 @@
 - 1000 次随机提议重放一致
 - 玩家提议不能使用日程专用效果
 - 休整跨越多个日程时逐一触发
+
+## 实现备注
+
+- `ScheduledFiring` 另有 `fireAt: Long? = null`，仅 `armed` 记录使用，重放无须重新计算武装时刻。`cancelled`、`armed` 也各记一条，重放逐条应用。
+- 每轮上限 64 只计触发与跳过；`ModuleWorld.schedule` 至多 256 项。日程 ID 与其他实体共用 `模组ID:` 前缀与唯一性检查。
+- `ClockSpec`：`labels` 循环，每格 `minutesPerUnit` 分钟，`gameTime=0` 落在 `startLabel`；显示为「第N日 标签」。
+- `transfer_item` 的 `value` 另允许 `player`（NPC 把物品交给玩家）。`set_flag` 的 `targetId` 固定为 `world`。
+- 条件事件只在每次结算后求值；武装时刻为该次结算的 `gameTime`。
+- 持久化：`campaign.flagsJson`、`campaign.scheduleJson` 两个可空列并入 `Migration(1,2)`，NULL 表示空映射。

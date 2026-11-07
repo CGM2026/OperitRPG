@@ -103,6 +103,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                     "create" -> AgentCreate(state, controller, { page = "library" }, onModelSettings, ::dismissKeyboard)
                     "play" -> if (play != null) {
                         Text("${play.location} · ${play.status}", Modifier.padding(horizontal = 28.dp), style = MaterialTheme.typography.bodySmall)
+                        Text("时辰 ${play.clock}", Modifier.padding(horizontal = 28.dp).semantics { contentDescription = "时辰" }, style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                             listOf("人物", "线索", "地点", "记事", "规则", "存档").forEach { name ->
                                 TextButton(onClick = { dismissKeyboard(); panel = name; if (name == "记事") controller.loadNotes() }, contentPadding = PaddingValues(4.dp)) { Text(name) }

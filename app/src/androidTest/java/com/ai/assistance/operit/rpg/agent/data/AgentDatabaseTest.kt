@@ -184,20 +184,21 @@ class AgentDatabaseTest {
   assertEquals(5,after.world.npcs.single{it.id==m.world.npcs.first().id}.relationships["trust"])
  }
  @get:Rule val migrations=MigrationTestHelper(InstrumentationRegistry.getInstrumentation(),AgentDatabase::class.java)
- private val wuxia:ValidatedModule get() {
+ private val wuxia:ValidatedModule get()=wuxiaWith(emptyList())
+ private fun wuxiaWith(schedule:List<ScheduledEvent>,flags:Map<String,String> = emptyMap()):ValidatedModule {
   val text="检定使用二十面骰";val ref=SourceRef("module/sources/rules.md",sha256(text),"check","module_rule")
   fun fighter(id:String,name:String)=D20Combatant(id,name,1,mapOf("might" to 14,"vigor" to 10),2,emptySet(),mapOf("athletics" to 1),12,mapOf("hp" to PoolValue(20,20)),emptyMap(),"long",emptyMap(),emptySet(),mapOf("sword" to WeaponAttack("Sword","might",true,"1d8+2")))
   val d20=D20Rules(listOf("might","vigor"),mapOf("athletics" to "might"),mapOf("easy" to 10,"medium" to 13),mapOf("hp" to PoolRule("HP",restoreOn="long")),emptyMap(),emptyMap(),emptyMap(),RestRule(10,480,"hp"),true,setOf("hp"),"vigor")
   val base=ValidatedModule(ModuleManifest(1,"wx","1.0.0","武侠","test","公开简介",1,"wuxia-d20-v1","1",emptyList()),"wx-hash",
-   ModuleWorld("wx:hall",listOf(CharacterTemplate("wx:hero","侠客",emptyMap(),emptyMap())),listOf(Location("wx:hall","大厅","",emptyList())),listOf(NpcState("wx:foe","恶徒","wx:hall","idle","凶狠","劫财")),emptyList(),emptyList(),emptyList(),emptyList(),GenerationPolicy(emptySet(),0,emptySet()),listOf(fighter("wx:hero","侠客"),fighter("wx:foe","恶徒"))),
+   ModuleWorld("wx:hall",listOf(CharacterTemplate("wx:hero","侠客",emptyMap(),emptyMap())),listOf(Location("wx:hall","大厅","",emptyList())),listOf(NpcState("wx:foe","恶徒","wx:hall","idle","凶狠","劫财")),emptyList(),emptyList(),emptyList(),emptyList(),GenerationPolicy(emptySet(),0,emptySet()),listOf(fighter("wx:hero","侠客"),fighter("wx:foe","恶徒")),schedule,flags),
    ModuleRules("wuxia-d20-v1","1",emptySet(),emptyMap(),emptyMap(),setOf("time"),listOf(RuleEvidence("wx:rule",ref,text,Visibility(Audience.PUBLIC))),"分钟",d20),mapOf("module/sources/rules.md" to text))
   val files=base.sources+mapOf("module/world.json" to encode(base.world),"module/rules.json" to encode(base.rules))
   val manifest=base.manifest.copy(files=files.toSortedMap().map{FileDigest(it.key,it.value.toByteArray().size.toLong(),sha256(it.value))})
   return base.copy(manifest=manifest,contentHash=sha256(StrictJson.json.encodeToString(manifest)),originalFiles=files)
  }
  /** Installs the wuxia module, commits one weapon turn through the real adapter, and returns the stored campaign. */
- private fun committedWuxia(id:String):Campaign {
-  val m=wuxia;RoomModuleCatalog(db).install(m)
+ private fun committedWuxia(id:String,m:ValidatedModule=wuxia):Campaign {
+  RoomModuleCatalog(db).install(m)
   store.createCampaign(Campaign(id,id,VersionRef("wx","1.0.0",m.contentHash),VersionRef("wuxia-d20-v1","1",m.contentHash),0,0,initialWorld(m,"wx:hero"),false,"local-profile","local-narrator",0))
   val c=store.loadCampaign(id)!!
   val proposal=ActionProposal("d20",emptyList(),null,"",listOf("wx:rule"),emptyList(),emptyList(),emptyList(),publicSummary="出剑",d20=listOf(D20Action("weapon","wx:hero",listOf("wx:foe"),weaponId="sword")))
@@ -240,6 +241,23 @@ class AgentDatabaseTest {
   assertEquals(2,store.events(c.id,0,10).single().eventVersion)
   assertEquals(store.history("w",null,10).single().result!!.rolls,store.history(c.id,null,10).single().result!!.rolls)
  }
+ @Test fun scheduleFlagsAndNoticesSurviveReopenAndBackup(){
+  val ref=SourceRef("module/sources/rules.md",sha256("检定使用二十面骰"),"check","module_rule")
+  val timed=ScheduledEvent("wx:bell","钟声",atMinute=0,effects=listOf(Effect("set_flag","world",key="bell",value="rung",source=ref)),notice="远处传来钟声")
+  val later=ScheduledEvent("wx:later","稍后",atMinute=500,effects=listOf(Effect("set_flag","world",key="later",value="yes",source=ref)))
+  val saved=committedWuxia("s",wuxiaWith(listOf(timed,later),mapOf("bridge" to "open")))
+  assertEquals(mapOf("bridge" to "open","bell" to "rung"),saved.world.flags)
+  assertEquals("fired",saved.world.schedule.getValue("wx:bell").state);assertEquals("pending",saved.world.schedule.getValue("wx:later").state)
+  assertEquals(listOf("远处传来钟声"),store.history("s",null,10).single().result!!.notices)
+  assertEquals(listOf("wx:bell"),store.events("s",0,10).single().scheduled.map{it.scheduleId})
+  db.close();open()
+  assertEquals(canonicalWorld(saved.world),canonicalWorld(store.loadCampaign("s")!!.world))
+  val service=AgentBackupService(db,context.cacheDir);val out=ByteArrayOutputStream();service.export("s",out)
+  val restored=service.importBackup(ByteArrayInputStream(out.toByteArray()))
+  val c=store.loadCampaign(restored.campaignId)!!
+  assertEquals(canonicalWorld(saved.world),canonicalWorld(c.world))
+  assertEquals(listOf("远处传来钟声"),store.history(c.id,null,10).single().result!!.notices)
+ }
  @Test fun migration1To2AddsNullableD20JsonWithoutLosingCampaigns(){
   val file="agent-migration-${UUID.randomUUID()}.db"
   try {
@@ -249,13 +267,14 @@ class AgentDatabaseTest {
    }
    migrations.runMigrationsAndValidate(file,2,true,AGENT_MIGRATION_1_2).also{migrated->
     migrated.query("SELECT d20Json FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertTrue(cursor.isNull(0))}
+    migrated.query("SELECT flagsJson,scheduleJson FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertTrue(cursor.isNull(0));assertTrue(cursor.isNull(1))}
     migrated.query("SELECT modelFingerprint,narratorFingerprint,contentLevel,sceneHold FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertEquals("old-model",cursor.getString(0));assertEquals("old-model",cursor.getString(1));assertEquals(0,cursor.getInt(2));assertEquals(0,cursor.getInt(3))}
     migrated.close()
    }
    val reopened=Room.databaseBuilder(context,AgentDatabase::class.java,file).addMigrations(AGENT_MIGRATION_1_2).build()
    try{
     val old=RoomAgentStore(reopened).loadCampaign("old")!!
-    assertEquals(3L,old.revision);assertNull(old.world.d20);assertEquals("old-model",old.narratorFingerprint)
+    assertEquals(3L,old.revision);assertNull(old.world.d20);assertTrue(old.world.flags.isEmpty()&&old.world.schedule.isEmpty());assertEquals("old-model",old.narratorFingerprint)
    } finally {reopened.close()}
   } finally {context.deleteDatabase(file)}
  }

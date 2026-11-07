@@ -90,7 +90,7 @@ class WuxiaD20 : RuleAdapter {
         validateContentLevels(r)
         val d = rulesOf(module)
         require(r.allowedEffects.all { it in narrativeEffects }) { "UNKNOWN_EFFECT" }
-        val ids = w.locations.map { it.id } + w.npcs.map { it.id } + w.items.map { it.id } + w.facts.map { it.id } + w.objectives.map { it.id } + w.characters.map { it.id } + w.actions.map { it.id }
+        val ids = w.locations.map { it.id } + w.npcs.map { it.id } + w.items.map { it.id } + w.facts.map { it.id } + w.objectives.map { it.id } + w.characters.map { it.id } + w.actions.map { it.id } + w.schedule.map { it.id }
         require(ids.distinct().size == ids.size && ids.all { it.startsWith(module.manifest.moduleId + ":") }) { "INVALID_ENTITY_ID" }
         require(w.locations.any { it.id == w.startLocationId }) { "MISSING_START_LOCATION" }
         require(w.characters.isNotEmpty()) { "MISSING_CHARACTER" }
@@ -111,6 +111,7 @@ class WuxiaD20 : RuleAdapter {
             val local = campaign.copy(world = campaign.world.copy(locationId = actionLocation))
             validateProposal(local, module, ActionProposal(a.actionType, a.targetIds, a.skill, a.difficulty, listOf(a.ruleId), a.conditions, a.successEffects, a.failureEffects, publicSummary = a.title), r.evidence)
         }
+        Scheduler.validateModule(module, campaign.world)
         validateState(campaign.world, module)
     }
 
@@ -348,10 +349,14 @@ class WuxiaD20 : RuleAdapter {
         val outcomes = p.d20.map { settle.perform(it) }
         if (p.actionType == "d20") settle.closeExchange(p.d20.first().actorId, p.successEffects)
         val success = if (outcomes.isEmpty()) true else outcomes.first()
-        val event = WorldEvent(2, campaign.id, campaign.lastEventSeq + 1, turnId, p.successEffects, p.creations, null, Visibility(Audience.PUBLIC), (plan.evidence.map { it.source } + p.successEffects.map { it.source }).distinct(), settle.rolls.toList(), settle.changes.toList())
-        val replayed = applyRecordedEvent(campaign.world, event, module)
-        check(replayed.d20 == settle.world.d20) { "REPLAY_MISMATCH" }
-        return event to CommittedResult(turnId, event.seq, success, null, p.publicSummary, plan.evidence.filter { it.visibility.audience == Audience.PUBLIC }, publicRolls(event.rolls, pcIds(module)))
+        val base = WorldEvent(2, campaign.id, campaign.lastEventSeq + 1, turnId, p.successEffects, p.creations, null, Visibility(Audience.PUBLIC), (plan.evidence.map { it.source } + p.successEffects.map { it.source }).distinct(), settle.rolls.toList(), settle.changes.toList())
+        val played = applyRecordedEvent(campaign.world, base, module)
+        check(played.d20 == settle.world.d20) { "REPLAY_MISMATCH" }
+        // The schedule runs on the world the player's action produced, including rest time and narrative time effects.
+        val fired = Scheduler.run(played, module, base.seq)
+        val event = base.copy(scheduled = fired.firings)
+        check(applyRecordedEvent(campaign.world, event, module) == fired.world) { "REPLAY_MISMATCH" }
+        return event to CommittedResult(turnId, event.seq, success, null, p.publicSummary, plan.evidence.filter { it.visibility.audience == Audience.PUBLIC }, publicRolls(event.rolls, pcIds(module)), fired.notices)
     }
 
     private class D20Roll(val natural: Int, val faces: List<Int>, val expression: String)
@@ -725,10 +730,12 @@ class WuxiaD20 : RuleAdapter {
             require(c.source.authority == "generated" && c.type in module.world.policy.allowedEntityTypes && w.generated.none { it.id == c.id })
             w = w.copy(generated = w.generated + c, npcs = if (c.type == "npc") w.npcs + NpcState(c.id, c.title, c.locationId, "idle", c.description, "未设定") else w.npcs)
         }
+        w = Scheduler.apply(w, event.scheduled, event.seq, module)
         validateState(w, module); return w
     }
 
     override fun validateState(world: WorldState, module: ValidatedModule) {
+        Scheduler.validateState(world, module)
         val d = rulesOf(module)
         require(module.world.locations.any { it.id == world.locationId })
         require(world.gameTime >= 0 && world.generated.size <= module.world.policy.maxEntities)

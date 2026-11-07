@@ -53,7 +53,8 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
      val id="event:$campaignId:${result.eventSeq}"
      val roll=result.dice?.let{"；骰点 ${it.value}/${it.threshold}"}.orEmpty()
      val outcome=if(result.success)"成功" else "未成功"
-     if(dao.memory(campaignId,id)==null) RoomMemoryRepository(db).save(MemoryItem(id,campaignId,"${result.publicSummary}；$outcome$roll",turn.plan?.proposal?.targetIds.orEmpty(),result.eventSeq,result.eventSeq,Visibility(Audience.PUBLIC),"ACTIVE",sourceTurnId=turn.id))
+     val omens=result.notices.joinToString(""){"；征兆：$it"}
+     if(dao.memory(campaignId,id)==null) RoomMemoryRepository(db).save(MemoryItem(id,campaignId,"${result.publicSummary}；$outcome$roll$omens",turn.plan?.proposal?.targetIds.orEmpty(),result.eventSeq,result.eventSeq,Visibility(Audience.PUBLIC),"ACTIVE",sourceTurnId=turn.id))
     }
     if(turn.phase==TurnPhase.COMPLETE && turn.result==null && turn.narration!=null) {
      val id="conversation:$campaignId:${turn.id}"
@@ -89,14 +90,14 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
   require(c.world.npcs.map{it.id}.distinct().size==c.world.npcs.size)
   require(c.world.knowledge.all{k->c.world.facts.any{it.id==k.factId} && (k.knowerId=="player" || c.world.npcs.any{it.id==k.knowerId})}) { "INVALID_KNOWLEDGE_REFERENCE" }
  }
- private fun Campaign.row(pending:String?)=CampaignRow(id,title,module.id,module.version,module.hash,encode(rules),revision,lastEventSeq,world.locationId,encode(world.resources),encode(world.skills),world.gameTime,allowGeneration,modelFingerprint,narratorFingerprint,updatedAt,pending,nextTurnOrdinal,world.d20?.let{encode(it)},contentLevel,sceneHold)
+ private fun Campaign.row(pending:String?)=CampaignRow(id,title,module.id,module.version,module.hash,encode(rules),revision,lastEventSeq,world.locationId,encode(world.resources),encode(world.skills),world.gameTime,allowGeneration,modelFingerprint,narratorFingerprint,updatedAt,pending,nextTurnOrdinal,world.d20?.let{encode(it)},contentLevel,sceneHold,world.flags.takeIf{it.isNotEmpty()}?.let{encode(it)},world.schedule.takeIf{it.isNotEmpty()}?.let{encode(it)})
  private fun campaign(r:CampaignRow):Campaign {
   val rows=dao.world(r.id)
   fun <T> entities(kind:String,read:(String)->T)=rows.filter{it.kind==kind}.map{read(it.json)}
   val relations=dao.relations(r.id).groupBy{it.npcId};val goals=dao.goals(r.id).associate{it.npcId to it.goal}
   val npcs=dao.npcs(r.id).map{NpcState(it.id,it.name,it.locationId,it.status,it.personality,goals.getValue(it.id),relations[it.id].orEmpty().associate{r->r.dimension to r.value},it.nextActionAt)}
   val facts=dao.facts(r.id).map{Fact(it.id,it.text,Visibility(Audience.valueOf(it.audience),it.subjectId),it.locked,decode(it.sourceJson))}
-  val world=WorldState(r.locationId,decode(r.resourcesJson),decode(r.skillsJson),npcs,entities("ITEM"){decode<Item>(it)},facts,entities("OBJECTIVE"){decode<Objective>(it)},dao.knowledge(r.id).map{KnowledgeEdge(it.knowerId,it.factId,it.learnedAtSeq,it.method,it.belief)},entities("GENERATED"){decode<EntityCreation>(it)},r.gameTime,r.d20Json?.let{decode<D20State>(it)})
+  val world=WorldState(r.locationId,decode(r.resourcesJson),decode(r.skillsJson),npcs,entities("ITEM"){decode<Item>(it)},facts,entities("OBJECTIVE"){decode<Objective>(it)},dao.knowledge(r.id).map{KnowledgeEdge(it.knowerId,it.factId,it.learnedAtSeq,it.method,it.belief)},entities("GENERATED"){decode<EntityCreation>(it)},r.gameTime,r.d20Json?.let{decode<D20State>(it)},r.flagsJson?.let{decode<Map<String,String>>(it)}.orEmpty(),r.scheduleJson?.let{decode<Map<String,ScheduleStatus>>(it)}.orEmpty())
   return Campaign(r.id,r.title,VersionRef(r.moduleId,r.moduleVersion,r.moduleHash),decode(r.rulesJson),r.revision,r.lastEventSeq,world,r.allowGeneration,r.modelFingerprint,r.narratorFingerprint,r.updatedAt,r.nextTurnOrdinal,r.contentLevel,r.sceneHold)
  }
  private fun saveWorld(c:Campaign) {

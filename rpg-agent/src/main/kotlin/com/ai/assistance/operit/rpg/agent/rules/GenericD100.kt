@@ -41,7 +41,7 @@ class GenericD100 : RuleAdapter {
         require(r.adapterId == "generic-d100-v1" && r.adapterVersion == "1") { "UNKNOWN_RULE_ADAPTER" }
         validateContentLevels(r)
         require(r.allowedEffects.all { it in effects }) { "UNKNOWN_EFFECT" }
-        val ids = w.locations.map { it.id } + w.npcs.map { it.id } + w.items.map { it.id } + w.facts.map { it.id } + w.objectives.map { it.id } + w.characters.map { it.id } + w.actions.map { it.id }
+        val ids = w.locations.map { it.id } + w.npcs.map { it.id } + w.items.map { it.id } + w.facts.map { it.id } + w.objectives.map { it.id } + w.characters.map { it.id } + w.actions.map { it.id } + w.schedule.map { it.id }
         require(ids.distinct().size == ids.size && ids.all { it.startsWith(module.manifest.moduleId + ":") }) { "INVALID_ENTITY_ID" }
         require(w.locations.any { it.id == w.startLocationId }) { "MISSING_START_LOCATION" }
         require(w.characters.isNotEmpty()) { "MISSING_CHARACTER" }
@@ -58,6 +58,7 @@ class GenericD100 : RuleAdapter {
             val local=campaign.copy(world=campaign.world.copy(locationId=actionLocation))
             validateProposal(local,module,ActionProposal(a.actionType,a.targetIds,a.skill,a.difficulty,listOf(a.ruleId),a.conditions,a.successEffects,a.failureEffects,publicSummary=a.title),r.evidence)
         }
+        Scheduler.validateModule(module,campaign.world)
         validateState(campaign.world,module)
     }
     override fun availableActions(campaign: Campaign, module: ValidatedModule): List<ActionDefinition> = module.world.actions.filter { it.conditions.all { c -> condition(c, campaign.world) } }
@@ -94,7 +95,7 @@ class GenericD100 : RuleAdapter {
     }
     internal fun count(c: Condition, depth: Int): Int { require(depth <= 8) { "CONDITION_DEPTH" }; return 1+c.children.sumOf { count(it,depth+1) } }
     internal fun validateCondition(c: Condition,w:WorldState,m:ValidatedModule) {
-        require(c.type in setOf("all","any","not","location","resource_gte","fact_known","objective","time_gte")) { "UNKNOWN_CONDITION" }
+        require(c.type in setOf("all","any","not","location","resource_gte","fact_known","objective","time_gte","flag_eq","npc_at","item_owner","schedule_state")) { "UNKNOWN_CONDITION" }
         when(c.type) {
             "all","any" -> require(c.children.isNotEmpty())
             "not" -> require(c.children.size == 1)
@@ -103,6 +104,10 @@ class GenericD100 : RuleAdapter {
             "fact_known" -> require(w.facts.any { it.id == c.targetId })
             "objective" -> require(w.objectives.any { it.id == c.targetId } && c.value in setOf("active","complete","failed"))
             "time_gte" -> require(c.value?.toLongOrNull() != null)
+            "flag_eq" -> require(!c.key.isNullOrBlank() && c.value != null)
+            "npc_at" -> require(w.npcs.any { it.id == c.targetId } && m.world.locations.any { it.id == c.value })
+            "item_owner" -> require(w.items.any { it.id == c.targetId } && (c.value == "player" || w.npcs.any { it.id == c.value } || m.world.locations.any { it.id == c.value }))
+            "schedule_state" -> require(m.world.schedule.any { it.id == c.targetId } && c.value in Scheduler.states)
         }
         c.children.forEach { validateCondition(it,w,m) }
     }
@@ -113,6 +118,10 @@ class GenericD100 : RuleAdapter {
         "fact_known" -> w.facts.any { it.id == c.targetId && it.visibility.audience == Audience.PUBLIC }
         "objective" -> w.objectives.any { it.id == c.targetId && it.status == c.value }
         "time_gte" -> w.gameTime >= requireNotNull(c.value).toLong()
+        "flag_eq" -> w.flags[requireNotNull(c.key)] == requireNotNull(c.value)
+        "npc_at" -> w.npcs.any { it.id == c.targetId && it.locationId == c.value }
+        "item_owner" -> w.items.any { it.id == c.targetId && it.ownerId == c.value }
+        "schedule_state" -> w.schedule[c.targetId]?.state == c.value
         else -> error("UNKNOWN_CONDITION")
     }
     private fun validateEffect(e:Effect,w:WorldState,m:ValidatedModule) = NarrativeEffects.validate(e,w,m,effects)
@@ -123,9 +132,11 @@ class GenericD100 : RuleAdapter {
         val p=plan.proposal
         val roll=p.skill?.let { val value=dice.roll(100); require(value in 1..100); DiceRoll(100,value,(campaign.world.skills.getValue(it)+module.rules.difficulties.getValue(p.difficulty)).coerceIn(1,100)) }
         val success=roll == null || roll.value <= roll.threshold
-        val event=WorldEvent(1,campaign.id,campaign.lastEventSeq+1,turnId,if(success)p.successEffects else p.failureEffects,if(success)p.creations else emptyList(),roll,Visibility(Audience.PUBLIC),(plan.evidence.map { it.source }+(if(success)p.successEffects else p.failureEffects).map { it.source }).distinct())
-        applyRecordedEvent(campaign.world,event,module)
-        return event to CommittedResult(turnId,event.seq,success,roll,p.publicSummary,plan.evidence.filter { it.visibility.audience == Audience.PUBLIC })
+        val base=WorldEvent(1,campaign.id,campaign.lastEventSeq+1,turnId,if(success)p.successEffects else p.failureEffects,if(success)p.creations else emptyList(),roll,Visibility(Audience.PUBLIC),(plan.evidence.map { it.source }+(if(success)p.successEffects else p.failureEffects).map { it.source }).distinct())
+        val fired=Scheduler.run(applyRecordedEvent(campaign.world,base,module),module,base.seq)
+        val event=base.copy(scheduled=fired.firings)
+        check(applyRecordedEvent(campaign.world,event,module)==fired.world) { "REPLAY_MISMATCH" }
+        return event to CommittedResult(turnId,event.seq,success,roll,p.publicSummary,plan.evidence.filter { it.visibility.audience == Audience.PUBLIC },notices=fired.notices)
     }
     override fun applyRecordedEvent(world:WorldState,event:WorldEvent,module:ValidatedModule):WorldState {
         require(event.eventVersion == 1) { "UNKNOWN_EVENT_VERSION" }
@@ -138,9 +149,11 @@ class GenericD100 : RuleAdapter {
             require(c.source.authority == "generated" && c.type in module.world.policy.allowedEntityTypes && w.generated.none { it.id==c.id })
             w=w.copy(generated=w.generated+c,npcs=if(c.type=="npc")w.npcs+NpcState(c.id,c.title,c.locationId,"idle",c.description,"未设定") else w.npcs)
         }
+        w=Scheduler.apply(w,event.scheduled,event.seq,module)
         validateState(w,module); return w
     }
     override fun validateState(world:WorldState,module:ValidatedModule) {
+        Scheduler.validateState(world,module)
         require(module.world.locations.any { it.id==world.locationId })
         world.resources.forEach { (key,value) -> val b=module.rules.resourceBounds.getValue(key); require(value in b.min..b.max) }
         require(world.gameTime>=0 && world.generated.size<=module.world.policy.maxEntities)
@@ -151,7 +164,7 @@ class GenericD100 : RuleAdapter {
 fun validVisibility(v:Visibility)= when(v.audience) { Audience.PUBLIC,Audience.GM -> v.subjectId==null; Audience.NPC,Audience.FACTION -> !v.subjectId.isNullOrBlank() }
 fun initialWorld(module:ValidatedModule,characterId:String):WorldState {
     val c=module.world.characters.single { it.id==characterId }
-    val world=WorldState(module.world.startLocationId,c.resources,c.skills,module.world.npcs,module.world.items,module.world.facts,module.world.objectives,emptyList())
+    val world=WorldState(module.world.startLocationId,c.resources,c.skills,module.world.npcs,module.world.items,module.world.facts,module.world.objectives,emptyList(),flags=module.world.initialFlags,schedule=Scheduler.initialSchedule(module.world))
     return if(module.rules.adapterId==WuxiaD20.ID) world.copy(d20=WuxiaD20.initialState(module,characterId)) else world
 }
 fun freeze(c:Campaign,p:ActionProposal,evidence:List<RuleEvidence>):FrozenPlan { val hash=digest(Json.encodeToString(p)+c.revision+c.module.hash+c.rules.hash+c.modelFingerprint+Json.encodeToString(evidence)); return FrozenPlan(c.revision,c.module.hash,c.rules.hash,c.modelFingerprint,p,evidence,hash) }

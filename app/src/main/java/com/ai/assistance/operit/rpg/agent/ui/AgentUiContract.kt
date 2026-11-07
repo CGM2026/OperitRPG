@@ -13,7 +13,7 @@ data class AgentPerson(val id: String, val name: String, val detail: String)
 data class AgentTurnUi(val id: String, val input: String, val narration: String, val stage: String,
     val result: String?, val confirmation: String?, val error: String?, val canResume: Boolean,
     val canCancel: Boolean, val evidence: List<RuleEvidence>)
-data class AgentPlayUi(val id: String, val title: String, val location: String, val status: String,
+data class AgentPlayUi(val id: String, val title: String, val location: String, val status: String, val clock: String,
     val modelFingerprint: String, val narratorFingerprint: String, val contentLevelLabel: String?, val turns: List<AgentTurnUi>, val people: List<AgentPerson>,
     val places: List<AgentPerson>, val facts: List<String>, val objectives: List<String>,
     val canAct: Boolean, val hasOlderTurns: Boolean)

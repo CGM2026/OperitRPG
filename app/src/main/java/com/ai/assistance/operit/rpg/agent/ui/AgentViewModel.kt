@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.agent.rules.clockText
 import com.ai.assistance.operit.rpg.agent.data.*
 import com.ai.assistance.operit.rpg.agent.engine.AgentCoordinator
 import com.ai.assistance.operit.rpg.agent.engine.DemoTextModelPort
@@ -305,7 +306,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             val pending = history.lastOrNull { it.phase !in terminal }
             val places = listOf(public.location) + module.world.locations.filter { it.id in public.location.exits }
             AgentPlayUi(campaign.id, public.title, public.location.title,
-                public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", campaign.modelFingerprint, campaign.narratorFingerprint,
+                public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", clockText(module.world.clock, public.gameTime), campaign.modelFingerprint, campaign.narratorFingerprint,
                 module.rules.contentLevels.let { levels -> if (levels.isEmpty()) null else levels[campaign.contentLevel].label + if (campaign.sceneHold) " · 将收束场景" else "" },
                 history.map(::adaptTurn), public.npcs.map { AgentPerson(it.id, it.name, if (it.status == "idle") "在场" else it.status) }, places.map { AgentPerson(it.id, it.title, it.description) },
                 public.facts.map { it.text }, public.objectives.map { "${it.title} · ${when (it.status) { "active" -> "进行中"; "complete" -> "已完成"; else -> it.status }}" }, pending == null, olderPages[campaign.id] == true)
@@ -318,7 +319,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             progress = if (it.busy) play?.turns?.lastOrNull()?.stage?.takeIf { text -> text.isNotBlank() } ?: it.progress else null) }
     }
     private fun adaptTurn(t: Turn): AgentTurnUi = AgentTurnUi(t.id, t.playerText, t.narration.orEmpty(), stageText(t), t.result?.let { r ->
-        r.publicSummary + (r.dice?.let { "\nd100：${it.value} / ${it.threshold} · ${if (r.success) "成功" else "失败"}" } ?: "")
+        r.publicSummary + (r.dice?.let { "\nd100：${it.value} / ${it.threshold} · ${if (r.success) "成功" else "失败"}" } ?: "") + r.notices.joinToString("") { "\n征兆：$it" }
     }, if (t.phase == TurnPhase.AWAITING_CONFIRMATION) t.plan?.proposal?.publicSummary else null,
         t.error?.let { if (t.result != null) "结果已保存，叙述未完成。继续不会重新结算。" else errorText(it) },
         t.phase !in terminal && t.phase != TurnPhase.AWAITING_CONFIRMATION,
