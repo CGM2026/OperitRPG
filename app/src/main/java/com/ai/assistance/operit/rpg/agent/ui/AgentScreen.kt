@@ -11,8 +11,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
@@ -20,6 +22,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.ui.avatar.Avatar
+import com.ai.assistance.operit.rpg.ui.avatar.AvatarCatalog
+import com.ai.assistance.operit.rpg.ui.avatar.AvatarKind
 import com.ai.assistance.operit.rpg.update.RpgUpdateButton
 
 private val agentColors = lightColorScheme(primary = Color(0xFF586B62), onPrimary = Color.White,
@@ -32,6 +37,8 @@ private val agentColors = lightColorScheme(primary = Color(0xFF586B62), onPrimar
 @Composable
 fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
     val state by controller.state.collectAsState()
+    val context = LocalContext.current
+    val avatarCatalog = remember(context) { AvatarCatalog.load(context) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     fun dismissKeyboard() { focus.clearFocus(force = true); keyboard?.hide() }
@@ -81,9 +88,12 @@ fun AgentScreen(controller: AgentUiController, onModelSettings: () -> Unit) {
                         item { Button(onClick = { page = "create" }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) { Text("新建战役") } }
                         items(state.entries, key = { "${it.ref.engineId}:${it.ref.campaignId}" }) { entry ->
                             OutlinedCard(onClick = { controller.open(entry.ref.campaignId) }, modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(entry.title, style = MaterialTheme.typography.titleMedium)
-                                    Text("长团 Agent", style = MaterialTheme.typography.bodySmall)
+                                Row(Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Avatar(avatarCatalog.pick(AvatarKind.CAMPAIGN, entry.ref.campaignId), 44.dp)
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(entry.title, style = MaterialTheme.typography.titleMedium)
+                                        Text("长团 Agent", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
                             }
                         }
