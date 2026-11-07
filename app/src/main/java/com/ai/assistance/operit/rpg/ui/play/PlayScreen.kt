@@ -1,7 +1,5 @@
 package com.ai.assistance.operit.rpg.ui.play
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -42,7 +40,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -62,15 +59,8 @@ import com.ai.assistance.operit.rpg.agent.ui.AgentUiState
 import com.ai.assistance.operit.rpg.ui.avatar.Avatar
 import com.ai.assistance.operit.rpg.ui.avatar.AvatarCatalog
 import com.ai.assistance.operit.rpg.ui.avatar.AvatarKind
-import com.ai.assistance.operit.rpg.ui.home.ExportNames
-import com.ai.assistance.operit.rpg.ui.home.HomeFiles
 import com.ai.assistance.operit.rpg.ui.theme.NarrationFontFamily
-import java.time.LocalDate
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /** Reading-style play surface: narration, player bubbles, roll chips and the character sheet. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,7 +69,6 @@ fun PlayScreen(
     play: AgentPlayUi,
     state: AgentUiState,
     controller: AgentUiController,
-    files: HomeFiles,
     onBack: () -> Unit,
     onModelSettings: () -> Unit,
     onLibrary: () -> Unit,
@@ -90,42 +79,7 @@ fun PlayScreen(
     val campaignAvatar = remember(catalog, play.id) { catalog.pick(AvatarKind.CAMPAIGN, play.id) }
     val playerCharacterId = play.playerCharacterId
     val characterAvatar = remember(catalog, playerCharacterId) { playerCharacterId?.let { catalog.pick(AvatarKind.CHARACTER, it) } }
-    val scope = rememberCoroutineScope()
-    var backupMessage by remember { mutableStateOf<String?>(null) }
     var menuOpen by rememberSaveable { mutableStateOf(false) }
-    val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            backupMessage = null
-            try {
-                val id = withContext(Dispatchers.IO) {
-                    val input = context.contentResolver.openInputStream(uri) ?: error("FILE_UNAVAILABLE")
-                    input.use { files.importBackup(it) }
-                }
-                menuOpen = false
-                controller.open(id)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                backupMessage = "导入未完成：${e.message ?: "未知错误"}"
-            }
-        }
-    }
-    val backupCreator = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri != null) scope.launch {
-            backupMessage = null
-            try {
-                withContext(Dispatchers.IO) {
-                    val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("FILE_UNAVAILABLE")
-                    output.use { files.exportBackup(play.id, it) }
-                }
-                backupMessage = "已导出。"
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                backupMessage = "导出未完成：${e.message ?: "未知错误"}"
-            }
-        }
-    }
     val listState = rememberLazyListState()
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
     var menuPage by rememberSaveable { mutableStateOf("menu") }
@@ -308,27 +262,11 @@ fun PlayScreen(
                             }
                             OutlinedButton(onClick = { menuOpen = false; onLibrary() }, modifier = Modifier.fillMaxWidth()) { Text("管理资料与挂载") }
                         }
-                        "backup" -> {
-                            Text("备份包含本团依赖模组与原文，不含 API Key。中断回合需先处理。", style = MaterialTheme.typography.bodySmall)
-                            OutlinedButton(
-                                onClick = { backupImporter.launch(arrayOf("application/zip", "application/octet-stream")) },
-                                enabled = !state.busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("导入长团备份") }
-                            OutlinedButton(
-                                onClick = { backupCreator.launch(ExportNames.fileName(play.title, LocalDate.now(), "d20save")) },
-                                enabled = !state.busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("导出完整备份") }
-                            backupMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                            play.contentLevelLabel?.let { Text("当前内容分档：$it。输入 //降档 或 //升档 调整，//停 收束当前场景。", style = MaterialTheme.typography.bodySmall) }
-                        }
                         else -> {
                             MenuRow("模型绑定") { menuPage = "models" }
                             MenuRow("章节") { menuPage = "chapters" }
                             MenuRow("记事修订") { controller.loadNotes(); menuPage = "notes" }
                             MenuRow("参考资料") { menuPage = "documents" }
-                            MenuRow("备份") { menuPage = "backup" }
                             MenuRow("模组与资料") { menuOpen = false; onLibrary() }
                         }
                     }
@@ -432,6 +370,5 @@ private fun menuTitle(page: String) = when (page) {
     "chapters" -> "章节"
     "notes" -> "记事修订"
     "documents" -> "参考资料"
-    "backup" -> "备份"
     else -> "更多"
 }

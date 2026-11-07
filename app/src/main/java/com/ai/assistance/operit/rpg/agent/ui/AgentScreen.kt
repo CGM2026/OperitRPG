@@ -19,7 +19,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.rpg.agent.contract.*
-import com.ai.assistance.operit.rpg.ui.home.HomeFiles
 import com.ai.assistance.operit.rpg.ui.play.PlayScreen
 import com.ai.assistance.operit.rpg.update.RpgUpdateButton
 
@@ -27,7 +26,6 @@ import com.ai.assistance.operit.rpg.update.RpgUpdateButton
 @Composable
 fun AgentScreen(
     controller: AgentUiController,
-    files: HomeFiles,
     onModelSettings: () -> Unit,
     startPage: String,
     campaignId: String?,
@@ -74,7 +72,6 @@ fun AgentScreen(
                             play = play,
                             state = state,
                             controller = controller,
-                            files = files,
                             onBack = ::back,
                             onModelSettings = onModelSettings,
                             onLibrary = { page = "library" },

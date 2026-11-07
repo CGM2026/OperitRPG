@@ -71,7 +71,6 @@ fun D20AgentRoute(
     } else {
         AgentScreen(
             controller = controller,
-            files = controller,
             onModelSettings = onModelSettings,
             startPage = startPage,
             campaignId = targetCampaign,
