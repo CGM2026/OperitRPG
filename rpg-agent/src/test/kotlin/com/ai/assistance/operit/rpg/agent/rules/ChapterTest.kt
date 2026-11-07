@@ -58,10 +58,11 @@ class ChapterTest {
         val m = module(
             ChapterDefinition("t:c1", "One"),
             ChapterDefinition("t:c2", "Two", listOf(flag("stage", "1"))),
-            ChapterDefinition("t:c3", "Three", listOf(flag("stage", "2"))),
+            ChapterDefinition("t:c3", "Three", listOf(flag("night", "1"))),
         )
         val c = campaign(m, "t:c1")
-        val both = Chapters.advance(c, c.world.copy(flags = mapOf("stage" to "2")), m.rules)
+        // Both later chapters' conditions hold at once, so one settlement enters c2 and then c3.
+        val both = Chapters.advance(c, c.world.copy(flags = mapOf("stage" to "1", "night" to "1")), m.rules)
         assertEquals("t:c3", both.chapterId)
         assertEquals(listOf(ChapterMark("t:c2", "Two", 2), ChapterMark("t:c3", "Three", 3)), both.marks)
         val none = Chapters.advance(c, c.world, m.rules)
