@@ -120,7 +120,7 @@ class WuxiaD20Test {
     private val foe1 = "t:foe1"
     private val foe2 = "t:foe2"
 
-    private fun fresh(): Campaign = Campaign("c", "t", VersionRef("t", "1", module.contentHash), VersionRef("wuxia-d20-v1", "1", module.contentHash), 0, 0, initialWorld(module, hero), false, "m", 0)
+    private fun fresh(): Campaign = Campaign("c", "t", VersionRef("t", "1", module.contentHash), VersionRef("wuxia-d20-v1", "1", module.contentHash), 0, 0, initialWorld(module, hero), false, "m", "m", 0)
     private fun Campaign.cb(id: String): D20Combatant = requireNotNull(world.d20).combatants.getValue(id)
     private fun Campaign.hp(id: String): Int = cb(id).pools.getValue("hp").current
     private fun Campaign.edit(id: String, f: (D20Combatant) -> D20Combatant): Campaign {
@@ -165,7 +165,7 @@ class WuxiaD20Test {
 
     @Test fun genericAdapterStillRejectsD20AndVersionTwo() {
         val ex = ExampleModules.all().first()
-        val campaign = Campaign("c", "t", VersionRef(ex.manifest.moduleId, ex.manifest.version, ex.contentHash), VersionRef(ex.rules.adapterId, ex.rules.adapterVersion, ex.contentHash), 0, 0, initialWorld(ex, ex.world.characters.first().id), false, "m", 0)
+        val campaign = Campaign("c", "t", VersionRef(ex.manifest.moduleId, ex.manifest.version, ex.contentHash), VersionRef(ex.rules.adapterId, ex.rules.adapterVersion, ex.contentHash), 0, 0, initialWorld(ex, ex.world.characters.first().id), false, "m", "m", 0)
         assertNull(campaign.world.d20)
         val p = ActionProposal("d20", emptyList(), null, "normal", listOf(ex.rules.evidence.first().ruleId), emptyList(), emptyList(), emptyList(), publicSummary = "s", d20 = listOf(checkAction(hero, skill = "athletics")))
         code("UNKNOWN_ACTION") { GenericD100().validateProposal(campaign, ex, p, ex.rules.evidence) }

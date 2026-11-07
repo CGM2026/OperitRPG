@@ -110,7 +110,7 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                         }
                         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                             if (play.hasOlderTurns) item { TextButton(onClick = controller::loadOlder, enabled = !state.busy) { Text("加载更早记录") } }
-                            if (play.turns.isEmpty()) item { Text("你来到了${play.location}。可以查看人物、地点与目标，然后说出你想做的事。") }
+                            if (play.turns.isEmpty() && state.notices.isEmpty()) item { Text("你来到了${play.location}。可以查看人物、地点与目标，然后说出你想做的事。") }
                             items(play.turns, key = { it.id }) { turn ->
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(turn.input, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
@@ -133,11 +133,12 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                                     turn.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("规则出处 · ${evidence.source.anchor}") } }
                                 }
                             }
+                            items(state.notices) { notice -> Text(notice, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
                         }
-                        if (state.models.none { it.fingerprint == play.modelFingerprint }) TextButton(onClick = { panel = "存档" }, Modifier.padding(horizontal = 28.dp)) { Text("请为本战役绑定本机模型") }
+                        if (state.models.none { it.fingerprint == play.modelFingerprint } || state.models.none { it.fingerprint == play.narratorFingerprint }) TextButton(onClick = { panel = "存档" }, Modifier.padding(horizontal = 28.dp)) { Text("请为本战役绑定本机模型") }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(input, { input = it }, Modifier.weight(1f).semantics { contentDescription = "行动输入" }, placeholder = { Text("你想做什么？") }, maxLines = 3, enabled = !state.busy, isError = input.length > 2000)
-                            Button(onClick = { dismissKeyboard(); controller.submit(input.trim()); input = "" }, enabled = !state.busy && play.canAct && input.isNotBlank() && input.length <= 2000 && state.models.any { it.fingerprint == play.modelFingerprint }, modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
+                            OutlinedTextField(input, { input = it }, Modifier.weight(1f).semantics { contentDescription = "行动输入" }, placeholder = { Text("你想做什么？//开头为场外指令") }, maxLines = 3, enabled = !state.busy, isError = input.length > 2000)
+                            Button(onClick = { dismissKeyboard(); controller.submit(input.trim()); input = "" }, enabled = !state.busy && input.isNotBlank() && input.length <= 2000 && (input.startsWith("//") || play.canAct && state.models.any { it.fingerprint == play.modelFingerprint } && state.models.any { it.fingerprint == play.narratorFingerprint }), modifier = Modifier.heightIn(min = 56.dp)) { Text("发送") }
                         }
                     }
                 }
@@ -171,8 +172,12 @@ fun AgentScreen(controller: AgentUiController, onOpenLegacy: (String?) -> Unit, 
                             state.evidence.forEach { evidence -> TextButton(onClick = { selectedEvidence = evidence }) { Text("${evidence.source.anchor} · ${authorityText(evidence.source.authority)}") } }
                         }
                         "存档" -> {
-                            Text("模型变更用于后续请求。已结算但叙述中断时，可明确绑定模型后继续旁白，已保存结果保持不变。", style = MaterialTheme.typography.bodySmall)
-                            state.models.forEach { model -> OutlinedButton(onClick = { controller.bindModel(model.id) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (model.fingerprint == play.modelFingerprint) " · 当前" else "") } }
+                            Text("模型变更用于后续请求。规划模型与旁白模型分别绑定；已结算但叙述中断时，重绑旁白模型后可继续旁白，已保存结果保持不变。", style = MaterialTheme.typography.bodySmall)
+                            Text("规划模型", style = MaterialTheme.typography.titleMedium)
+                            state.models.forEach { model -> OutlinedButton(onClick = { controller.bindPlanner(model.id) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (model.fingerprint == play.modelFingerprint) " · 当前" else "") } }
+                            Text("旁白模型", style = MaterialTheme.typography.titleMedium)
+                            state.models.forEach { model -> OutlinedButton(onClick = { controller.bindNarrator(model.id) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (model.fingerprint == play.narratorFingerprint) " · 当前" else "") } }
+                            play.contentLevelLabel?.let { Text("当前内容分档：$it。输入 //降档 或 //升档 调整，//停 收束当前场景。", style = MaterialTheme.typography.bodySmall) }
                             TextButton(onClick = onModelSettings) { Text("模型配置") }
                             OutlinedButton(onClick = { exporter.launch("${play.title}.rpgsave2.zip") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出完整备份") }
                             TextButton(onClick = { panel = null; page = "library" }) { Text("模组与资料") }
@@ -211,9 +216,13 @@ private fun authorityText(value: String) = when (value) { "temporary", "house_ru
     var title by rememberSaveable { mutableStateOf("") }
     var moduleId by rememberSaveable { mutableStateOf<String?>(null) }
     var characterId by rememberSaveable { mutableStateOf<String?>(null) }
-    var modelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var plannerChoice by rememberSaveable { mutableStateOf<String?>(null) }
+    var narratorChoice by rememberSaveable { mutableStateOf<String?>(null) }
     var allow by rememberSaveable { mutableStateOf(false) }
     val module = state.modules.firstOrNull { it.ref.hash == moduleId }
+    // Both selectors start on the first listed model; the user may change either.
+    val plannerId = plannerChoice ?: state.models.firstOrNull()?.id
+    val narratorId = narratorChoice ?: state.models.firstOrNull()?.id
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         OutlinedTextField(title, { title = it }, label = { Text("战役名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Text("选择模组", style = MaterialTheme.typography.titleMedium)
@@ -226,11 +235,13 @@ private fun authorityText(value: String) = when (value) { "temporary", "house_ru
             selected.characters.forEach { character -> OutlinedButton(onClick = { dismissKeyboard(); characterId = character.id }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "选择角色 · ${character.name}" }) { Column { Text(character.name + if (characterId == character.id) " ✓" else ""); Text(character.detail, style = MaterialTheme.typography.bodySmall) } } }
         }
         Row { Switch(checked = allow, onCheckedChange = { allow = it }); Column(Modifier.padding(start = 12.dp)) { Text(if (allow) "允许补充细节" else "严格采用模组"); Text(if (allow) "在模组允许范围内补充人物、场景和支线。" else "按模组既有内容推进。", style = MaterialTheme.typography.bodySmall) } }
-        Text("选择模型", style = MaterialTheme.typography.titleMedium)
-        state.models.forEach { model -> OutlinedButton(onClick = { dismissKeyboard(); modelId = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (modelId == model.id) " ✓" else "") } }
+        Text("规划模型", style = MaterialTheme.typography.titleMedium)
+        state.models.forEach { model -> OutlinedButton(onClick = { dismissKeyboard(); plannerChoice = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (plannerId == model.id) " ✓" else "") } }
+        Text("旁白模型", style = MaterialTheme.typography.titleMedium)
+        state.models.forEach { model -> OutlinedButton(onClick = { dismissKeyboard(); narratorChoice = model.id }, modifier = Modifier.fillMaxWidth()) { Text(model.title + if (narratorId == model.id) " ✓" else "") } }
         TextButton(onClick = onModels) { Text("模型配置") }
-        Button(onClick = { dismissKeyboard(); controller.create(title.trim(), requireNotNull(module).ref, requireNotNull(characterId), allow, requireNotNull(modelId)) },
-            enabled = !state.busy && title.isNotBlank() && title.length <= 100 && module != null && characterId != null && state.models.any { it.id == modelId }, modifier = Modifier.fillMaxWidth()) { Text("开始战役") }
+        Button(onClick = { dismissKeyboard(); controller.create(title.trim(), requireNotNull(module).ref, requireNotNull(characterId), allow, requireNotNull(plannerId), requireNotNull(narratorId)) },
+            enabled = !state.busy && title.isNotBlank() && title.length <= 100 && module != null && characterId != null && state.models.any { it.id == plannerId } && state.models.any { it.id == narratorId }, modifier = Modifier.fillMaxWidth()) { Text("开始战役") }
     }
 }
 

@@ -53,9 +53,9 @@ class TestMemories:MemoryRepository {
 }
 class AgentEngineTest {
     private val m=ExampleModules.all().first()
-    private fun fixture(model:TextModelPort=DemoTextModelPort(m),store:TestStore=TestStore()):Pair<AgentCoordinator,TestStore> {
-        val a=AgentCoordinator(store,TestCatalog(m),TestRules(m),TestMemories(),model,DiceSource { _ -> 12 },Clock { 1000 })
-        a.create("c","长团",VersionRef(m.manifest.moduleId,m.manifest.version,m.contentHash),m.world.characters.first().id,true,"demo")
+    private fun fixture(model:TextModelPort=DemoTextModelPort(m),store:TestStore=TestStore(),narrator:TextModelPort=model):Pair<AgentCoordinator,TestStore> {
+        val a=AgentCoordinator(store,TestCatalog(m),TestRules(m),TestMemories(),model,narrator,DiceSource { _ -> 12 },Clock { 1000 })
+        a.create("c","长团",VersionRef(m.manifest.moduleId,m.manifest.version,m.contentHash),m.world.characters.first().id,true,"demo","demo")
         return a to store
     }
     @Test fun examplesRoundTripAndAreIndependent() {
@@ -84,6 +84,47 @@ class AgentEngineTest {
         assertEquals(TurnPhase.NARRATING,t.phase); assertEquals(1,s.log.size); val roll=t.result?.dice
         a.interrupt("c"); fail=false
         val resumed=a.resume("c",t.id); assertEquals(TurnPhase.COMPLETE,resumed.phase); assertEquals(roll,resumed.result?.dice); assertEquals(1,s.log.size)
+    }
+    private class RecordingPort(private val inner:TextModelPort):TextModelPort {
+        val packets=mutableListOf<ContextPacket>()
+        override fun cancel(attemptId:String)=inner.cancel(attemptId)
+        override suspend fun generate(attemptId:String,packet:ContextPacket):TextModelReply { packets+=packet; return inner.generate(attemptId,packet) }
+    }
+    @Test fun plannerAndNarratorPortsAreSeparateAndRebindIndependently()=runBlocking {
+        val planner=RecordingPort(DemoTextModelPort(m)); val narrator=RecordingPort(DemoTextModelPort(m))
+        val (a,s)=fixture(planner,narrator=narrator)
+        val first=a.submit("c","m1","等待")
+        assertTrue(planner.packets.isNotEmpty() && planner.packets.all { it.purpose=="planner" })
+        assertTrue(narrator.packets.isNotEmpty() && narrator.packets.all { it.purpose=="narrator" })
+        assertEquals(setOf("demo"),first.attempts.map { it.fingerprint }.toSet())
+        a.rebindNarrator("c","narrator-2")
+        assertEquals("demo",s.campaigns.getValue("c").modelFingerprint); assertEquals("narrator-2",s.campaigns.getValue("c").narratorFingerprint)
+        val second=a.submit("c","m2","等待")
+        assertEquals(setOf("demo"),second.attempts.filter { it.purpose=="planner" }.map { it.fingerprint }.toSet())
+        assertEquals(setOf("narrator-2"),second.attempts.filter { it.purpose=="narrator" }.map { it.fingerprint }.toSet())
+        a.rebindPlanner("c","planner-2")
+        assertEquals("planner-2",s.campaigns.getValue("c").modelFingerprint); assertEquals("narrator-2",s.campaigns.getValue("c").narratorFingerprint)
+        assertFails { a.rebindNarrator("c","") }; assertFails { a.rebindPlanner("c"," ") }
+    }
+    @Test fun sceneHoldAppliesToExactlyOneNarrationAndLevelsAreClamped()=runBlocking {
+        val leveled=m.copy(rules=m.rules.copy(contentLevels=listOf(ContentLevel("低","GUIDE_LOW"),ContentLevel("高","GUIDE_HIGH")),defaultContentLevel=0))
+        val narrator=RecordingPort(DemoTextModelPort(leveled)); val store=TestStore()
+        val a=AgentCoordinator(store,TestCatalog(leveled),TestRules(leveled),TestMemories(),DemoTextModelPort(leveled),narrator,DiceSource { _ -> 12 },Clock { 1000 })
+        a.create("c","长团",VersionRef(leveled.manifest.moduleId,leveled.manifest.version,leveled.contentHash),leveled.world.characters.first().id,true,"demo","demo")
+        assertEquals(0,store.campaigns.getValue("c").contentLevel)
+        a.holdScene("c"); assertTrue(store.campaigns.getValue("c").sceneHold)
+        a.submit("c","m1","等待")
+        assertTrue(narrator.packets.last().system.contains(ContextAssembler.SCENE_HOLD)); assertTrue(narrator.packets.last().system.contains("GUIDE_LOW"))
+        assertFalse(store.campaigns.getValue("c").sceneHold)
+        a.submit("c","m2","等待")
+        assertFalse(narrator.packets.last().system.contains(ContextAssembler.SCENE_HOLD))
+        assertEquals(1,a.adjustContentLevel("c",1).contentLevel); assertEquals(1,a.adjustContentLevel("c",1).contentLevel)
+        a.submit("c","m3","等待"); assertTrue(narrator.packets.last().system.contains("GUIDE_HIGH"))
+        assertEquals(0,a.adjustContentLevel("c",-1).contentLevel); assertEquals(0,a.adjustContentLevel("c",-1).contentLevel)
+    }
+    @Test fun tableCommandsRequireDeclaredContentLevels()=runBlocking {
+        val (a,_)=fixture()
+        assertFails { a.holdScene("c") }; assertFails { a.adjustContentLevel("c",1) }
     }
     @Test fun unknownToolAndDuplicateQueryStopBeforeCommit()=runBlocking {
         val port=object:TextModelPort { override fun cancel(attemptId:String)=Unit; override suspend fun generate(attemptId:String,packet:ContextPacket)=TextModelReply("{\"version\":1,\"kind\":\"read_tools\",\"calls\":[{\"invocationId\":\"x\",\"name\":\"shell\",\"arguments\":{}}]}",Usage(1,1)) }
@@ -164,7 +205,7 @@ class AgentEngineTest {
     @Test fun bothModulesCompleteThreeChaptersThroughRecordedActions() {
         ExampleModules.all().forEach { module ->
             val adapter=GenericD100(); val ref=VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash)
-            var c=Campaign("c","chapters",ref,VersionRef(module.rules.adapterId,module.rules.adapterVersion,module.contentHash),0,0,initialWorld(module,module.world.characters.first().id),false,"demo",0)
+            var c=Campaign("c","chapters",ref,VersionRef(module.rules.adapterId,module.rules.adapterVersion,module.contentHash),0,0,initialWorld(module,module.world.characters.first().id),false,"demo","demo",0)
             val recorded=mutableListOf<WorldEvent>()
             fun execute(p:ActionProposal) { val plan=freeze(c,p,module.rules.evidence); val (event,_)=adapter.resolve(c,plan,module,"turn-${c.revision}",DiceSource { _ -> 1 }); c=c.copy(world=adapter.applyRecordedEvent(c.world,event,module),revision=c.revision+1,lastEventSeq=event.seq); recorded+=event }
             module.world.locations.forEachIndexed { i,l ->

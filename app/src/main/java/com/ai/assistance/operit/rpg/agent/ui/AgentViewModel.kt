@@ -49,7 +49,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
     override val state: StateFlow<AgentUiState> = mutable.asStateFlow()
     @Volatile private var selectedId: String? = preferences.getString("campaign", null)
     private var operation: Job? = null
-    private var activePort: TextModelPort? = null
+    private var activePorts: List<TextModelPort> = emptyList()
     private val loadedPages = java.util.concurrent.ConcurrentHashMap<String, List<Turn>>()
     private val olderPages = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private var entryLimit = 50
@@ -66,54 +66,71 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         viewModelScope.launch {
             safely {
                 withContext(Dispatchers.IO) {
-                    selectedId?.let { id -> store.loadCampaign(id)?.let { coordinator(it.modelFingerprint, it.module).interrupt(id) } }
+                    selectedId?.let { id -> store.loadCampaign(id)?.let { coordinator(it).interrupt(id) } }
                     load()
                 }
             }
         }
         viewModelScope.launch { modelConfigs.configurations.collect { refresh() } }
     }
-    private fun coordinator(fingerprint: String, module: VersionRef): AgentCoordinator {
-        val port = if (fingerprint == DEMO_FINGERPRINT) DemoTextModelPort(catalog.get(module)) else AgentTextModelPort(app, fingerprint)
-        activePort = port
-        return AgentCoordinator(store, catalog, rules, memories, port, DiceSource { sides -> random.nextInt(sides) + 1 }, Clock { System.currentTimeMillis() })
+    private fun coordinator(c: Campaign): AgentCoordinator = coordinator(c.modelFingerprint, c.narratorFingerprint, c.module)
+    private fun coordinator(plannerFingerprint: String, narratorFingerprint: String, module: VersionRef): AgentCoordinator {
+        fun port(fingerprint: String): TextModelPort = if (fingerprint == DEMO_FINGERPRINT) DemoTextModelPort(catalog.get(module)) else AgentTextModelPort(app, fingerprint)
+        val planner = port(plannerFingerprint); val narrator = port(narratorFingerprint)
+        activePorts = listOf(planner, narrator)
+        return AgentCoordinator(store, catalog, rules, memories, planner, narrator, DiceSource { sides -> random.nextInt(sides) + 1 }, Clock { System.currentTimeMillis() })
     }
     override fun refresh() { viewModelScope.launch { safely { withContext(Dispatchers.IO) { load() } } } }
     override fun loadMoreEntries() { entryLimit += 50; refresh() }
     override fun open(id: String) = execute("读取战役") {
         val c = requireNotNull(store.loadCampaign(id)) { "CAMPAIGN_NOT_FOUND" }
         selectedId = id; loadedPages.remove(id); olderPages.remove(id)
-        mutable.update { it.copy(notes = emptyList(), evidence = emptyList()) }
+        mutable.update { it.copy(notes = emptyList(), evidence = emptyList(), notices = emptyList()) }
         preferences.edit().putString("campaign", id).apply()
-        coordinator(c.modelFingerprint, c.module).interrupt(id)
+        coordinator(c).interrupt(id)
     }
     override fun close() {
         if (mutable.value.busy) return
         selectedId = null; preferences.edit().remove("campaign").apply()
-        mutable.update { it.copy(play = null, notes = emptyList(), evidence = emptyList()) }
+        mutable.update { it.copy(play = null, notes = emptyList(), evidence = emptyList(), notices = emptyList()) }
     }
-    override fun create(title: String, module: VersionRef, characterId: String, allowGeneration: Boolean, modelId: String) = execute("建立战役") {
-        val model = modelOption(modelId)
+    override fun create(title: String, module: VersionRef, characterId: String, allowGeneration: Boolean, plannerModelId: String, narratorModelId: String) = execute("建立战役") {
+        val planner = modelOption(plannerModelId); val narrator = modelOption(narratorModelId)
         val id = UUID.randomUUID().toString()
-        coordinator(model.fingerprint, module).create(id, title, module, characterId, allowGeneration, model.fingerprint)
+        coordinator(planner.fingerprint, narrator.fingerprint, module).create(id, title, module, characterId, allowGeneration, planner.fingerprint, narrator.fingerprint)
         selectedId = id; loadedPages.remove(id); olderPages.remove(id); preferences.edit().putString("campaign", id).apply()
-        mutable.update { it.copy(notes = emptyList(), evidence = emptyList()) }
+        mutable.update { it.copy(notes = emptyList(), evidence = emptyList(), notices = emptyList()) }
     }
-    override fun submit(text: String) = execute("正在理解行动", poll = true) {
-        val c = current(); coordinator(c.modelFingerprint, c.module).submit(c.id, UUID.randomUUID().toString(), text)
+    override fun submit(text: String) {
+        if (text.startsWith(TABLE_COMMAND_PREFIX)) { tableCommand(text); return }
+        execute("正在理解行动", poll = true) {
+            val c = current(); coordinator(c).submit(c.id, UUID.randomUUID().toString(), text)
+        }
     }
-    override fun confirm(turnId: String) = execute("结算行动", poll = true) { val c = current(); coordinator(c.modelFingerprint, c.module).confirm(c.id, turnId) }
-    override fun resume(turnId: String) = execute("继续本轮", poll = true) { val c = current(); coordinator(c.modelFingerprint, c.module).resume(c.id, turnId) }
-    override fun cancel(turnId: String) = execute("取消行动") { val c = current(); coordinator(c.modelFingerprint, c.module).cancel(c.id, turnId) }
+    /** `//` input never becomes a turn or reaches a model; the reply is a local notice and is not written to the event stream. */
+    private fun tableCommand(text: String) = execute("场外指令") {
+        val c = current(); val levels = catalog.get(c.module).rules.contentLevels
+        val name = text.removePrefix(TABLE_COMMAND_PREFIX).trim()
+        val reply = when {
+            name !in TABLE_COMMANDS -> "可用场外指令：" + TABLE_COMMANDS.joinToString("　") { TABLE_COMMAND_PREFIX + it }
+            levels.isEmpty() -> "本模组未声明内容分档"
+            name == "停" -> { coordinator(c).holdScene(c.id); "下一段旁白将收束当前场景。" }
+            else -> { val changed = coordinator(c).adjustContentLevel(c.id, if (name == "降档") -1 else 1); "内容分档：${levels[changed.contentLevel].label}" }
+        }
+        mutable.update { it.copy(notices = it.notices + reply) }
+    }
+    override fun confirm(turnId: String) = execute("结算行动", poll = true) { val c = current(); coordinator(c).confirm(c.id, turnId) }
+    override fun resume(turnId: String) = execute("继续本轮", poll = true) { val c = current(); coordinator(c).resume(c.id, turnId) }
+    override fun cancel(turnId: String) = execute("取消行动") { val c = current(); coordinator(c).cancel(c.id, turnId) }
     override fun stop() {
         val running = operation ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                selectedId?.let { id -> store.history(id, null, 1).firstOrNull()?.attempts?.filter { it.status == "RUNNING" }?.forEach { activePort?.cancel(it.id) } }
+                selectedId?.let { id -> store.history(id, null, 1).firstOrNull()?.attempts?.filter { it.status == "RUNNING" }?.forEach { attempt -> activePorts.forEach { it.cancel(attempt.id) } } }
             }
             running.cancelAndJoin()
             safely { withContext(Dispatchers.IO) {
-                selectedId?.let { id -> store.loadCampaign(id)?.let { coordinator(it.modelFingerprint, it.module).interrupt(id) } }
+                selectedId?.let { id -> store.loadCampaign(id)?.let { coordinator(it).interrupt(id) } }
                 load()
             } }
             mutable.update { it.copy(busy = false, progress = null, message = "已停止。已提交的结果保留，可明确继续本轮。") }
@@ -126,14 +143,17 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         loadedPages[c.id] = (loaded + older).associateBy { it.id }.values.sortedBy { it.ordinal }
         olderPages[c.id] = older.size == 30
     }
-    override fun bindModel(modelId: String) = execute("绑定模型") {
+    override fun bindPlanner(modelId: String) = execute("绑定规划模型") {
+        val c = current(); coordinator(c).rebindPlanner(c.id, modelOption(modelId).fingerprint)
+    }
+    override fun bindNarrator(modelId: String) = execute("绑定旁白模型") {
         val c = current(); val fingerprint = modelOption(modelId).fingerprint
         val pending = store.history(c.id, null, 1).firstOrNull { it.phase !in terminal }
-        val engine = coordinator(c.modelFingerprint, c.module)
+        val engine = coordinator(c)
         if (pending?.result != null && pending.error != null) {
             engine.rebindInterruptedNarration(c.id, pending.id, fingerprint)
             message("已为中断叙述绑定模型。点击继续本轮生成旁白，已保存结果保持不变。")
-        } else engine.rebind(c.id, fingerprint)
+        } else engine.rebindNarrator(c.id, fingerprint)
     }
     override fun previewExample(hash: String) = execute("读取示例模组") {
         clearPending()
@@ -231,7 +251,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         require(callLimit in 1..4 && documentIds.isNotEmpty())
         val model = modelOption(modelId)
         require(model.fingerprint != DEMO_FINGERPRINT) { "REAL_MODEL_REQUIRED_FOR_DRAFT" }
-        val port = AgentTextModelPort(app, model.fingerprint); activePort = port
+        val port = AgentTextModelPort(app, model.fingerprint); activePorts = listOf(port)
         val selected = documentIds.map { id -> val doc = documents.list().single { it.id == id }; DraftDocument(doc.id, doc.title, documents.read(id)) }
         require(selected.sumOf { it.text.length + it.title.length } <= 6000) { "DRAFT_SOURCE_TOO_LARGE" }
         val result = AgentDraftService(port).organize(selected, callLimit)
@@ -285,7 +305,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
             val pending = history.lastOrNull { it.phase !in terminal }
             val places = listOf(public.location) + module.world.locations.filter { it.id in public.location.exits }
             AgentPlayUi(campaign.id, public.title, public.location.title,
-                public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", campaign.modelFingerprint,
+                public.resources.entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · 时间 ${public.gameTime} ${module.rules.timeUnit}", campaign.modelFingerprint, campaign.narratorFingerprint,
+                module.rules.contentLevels.let { levels -> if (levels.isEmpty()) null else levels[campaign.contentLevel].label + if (campaign.sceneHold) " · 将收束场景" else "" },
                 history.map(::adaptTurn), public.npcs.map { AgentPerson(it.id, it.name, if (it.status == "idle") "在场" else it.status) }, places.map { AgentPerson(it.id, it.title, it.description) },
                 public.facts.map { it.text }, public.objectives.map { "${it.title} · ${when (it.status) { "active" -> "进行中"; "complete" -> "已完成"; else -> it.status }}" }, pending == null, olderPages[campaign.id] == true)
         }
@@ -351,5 +372,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application), 
         return output.toByteArray()
     }
     private fun moduleOption(module: ValidatedModule) = AgentModuleOption(VersionRef(module.manifest.moduleId, module.manifest.version, module.contentHash), module.manifest.title, module.manifest.description, module.world.characters.map { character -> AgentCharacterOption(character.id, character.name, (character.skills + character.resources).entries.joinToString(" · ") { "${it.key} ${it.value}" }) })
-    private companion object { val terminal = setOf(TurnPhase.COMPLETE, TurnPhase.CANCELLED); const val DEMO_FINGERPRINT = "explicit-demo-v1" }
+    private companion object { val terminal = setOf(TurnPhase.COMPLETE, TurnPhase.CANCELLED); const val DEMO_FINGERPRINT = "explicit-demo-v1"
+        const val TABLE_COMMAND_PREFIX = "//"
+        val TABLE_COMMANDS = listOf("停", "降档", "升档") }
 }

@@ -87,6 +87,7 @@ class WuxiaD20 : RuleAdapter {
     override fun validateModule(module: ValidatedModule) {
         val w = module.world; val r = module.rules
         require(r.adapterId == ID && r.adapterVersion == "1") { "UNKNOWN_RULE_ADAPTER" }
+        validateContentLevels(r)
         val d = rulesOf(module)
         require(r.allowedEffects.all { it in narrativeEffects }) { "UNKNOWN_EFFECT" }
         val ids = w.locations.map { it.id } + w.npcs.map { it.id } + w.items.map { it.id } + w.facts.map { it.id } + w.objectives.map { it.id } + w.characters.map { it.id } + w.actions.map { it.id }
@@ -104,7 +105,7 @@ class WuxiaD20 : RuleAdapter {
         require(combatantIds.distinct().size == combatantIds.size && combatantIds.all { it in characterIds || it in npcIds }) { "INVALID_COMBATANT" }
         require(characterIds.all { it in combatantIds }) { "MISSING_COMBATANT" }
         w.d20Combatants.forEach { validateCombatant(it, d) }
-        val campaign = Campaign("validation", "", VersionRef(module.manifest.moduleId, module.manifest.version, module.contentHash), VersionRef(r.adapterId, r.adapterVersion, module.contentHash), 0, 0, initialWorld(module, w.characters.first().id), false, "", 0)
+        val campaign = Campaign("validation", "", VersionRef(module.manifest.moduleId, module.manifest.version, module.contentHash), VersionRef(r.adapterId, r.adapterVersion, module.contentHash), 0, 0, initialWorld(module, w.characters.first().id), false, "", "", 0)
         w.actions.forEach { a ->
             val actionLocation = a.conditions.firstOrNull { it.type == "location" }?.targetId ?: w.startLocationId
             val local = campaign.copy(world = campaign.world.copy(locationId = actionLocation))

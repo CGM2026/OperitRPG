@@ -2,6 +2,16 @@ package com.ai.assistance.operit.rpg.agent.rules
 
 import com.ai.assistance.operit.rpg.agent.contract.*
 
+/** Content levels are optional; when declared, labels and guidelines must be non-blank and the default must index one of them. */
+fun validateContentLevels(rules: ModuleRules) {
+    if (rules.contentLevels.isEmpty()) {
+        require(rules.defaultContentLevel == 0) { "INVALID_CONTENT_LEVEL" }
+        return
+    }
+    require(rules.contentLevels.size <= 10 && rules.contentLevels.all { it.label.isNotBlank() && it.narratorGuideline.isNotBlank() && it.label.length <= 40 && it.narratorGuideline.length <= 2000 }) { "INVALID_CONTENT_LEVEL" }
+    require(rules.defaultContentLevel in rules.contentLevels.indices) { "INVALID_CONTENT_LEVEL" }
+}
+
 object RuleAdapters {
     fun forRules(adapterId: String, adapterVersion: String): RuleAdapter = when {
         adapterId == "generic-d100-v1" && adapterVersion == "1" -> GenericD100()

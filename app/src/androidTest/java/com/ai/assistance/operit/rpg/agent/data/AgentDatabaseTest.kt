@@ -42,7 +42,7 @@ class AgentDatabaseTest {
  }
  @Before fun setup(){name="agent-test-${UUID.randomUUID()}.db";open();RoomModuleCatalog(db).install(module);store.createCampaign(campaign("a"));store.createCampaign(campaign("b"))}
  private fun open(){db=Room.databaseBuilder(context,AgentDatabase::class.java,name).build();store=RoomAgentStore(db)}
- private fun campaign(id:String)=Campaign(id,id,VersionRef("test","1.0.0",module.contentHash),VersionRef("generic-d100-v1","1",module.contentHash),0,0,initialWorld(module,"test:hero"),false,"local-profile",0)
+ private fun campaign(id:String)=Campaign(id,id,VersionRef("test","1.0.0",module.contentHash),VersionRef("generic-d100-v1","1",module.contentHash),0,0,initialWorld(module,"test:hero"),false,"local-profile","local-narrator",0)
  @After fun cleanup(){db.close();context.deleteDatabase(name)}
  @Test fun rollbackPendingUniquenessAndReopen(){
   try{store.transaction("a"){tx->tx.saveCampaign(tx.session.campaign.copy(revision=1));error("injected")}}catch(_:IllegalStateException){}
@@ -72,12 +72,13 @@ class AgentDatabaseTest {
   RoomMemoryRepository(db).save(MemoryItem("note","a","约定",emptyList(),0,0,Visibility(Audience.PUBLIC),"ACTIVE"))
   val corrected=RoomMemoryRepository(db).correct(RoleContext("a",Audience.PUBLIC),"note","修订约定")
   val docs=ReferenceDocumentService(db);val document=docs.importText("旅行补充","绳索桥边的守则",Visibility(Audience.PUBLIC));docs.attach("a",document)
+  store.transaction("a"){tx->tx.saveCampaign(tx.session.campaign.copy(contentLevel=0,sceneHold=true))}
   val service=AgentBackupService(db,context.cacheDir);val out=ByteArrayOutputStream();service.export("a",out)
   assertEquals("a",service.preview(ByteArrayInputStream(out.toByteArray())).title)
   val restored=service.importBackup(ByteArrayInputStream(out.toByteArray()))
   assertNotEquals("a",restored.campaignId)
   val c=store.loadCampaign(restored.campaignId)!!
-  assertEquals("",c.modelFingerprint);assertEquals(store.loadCampaign("a")!!.world,c.world)
+  assertEquals("",c.modelFingerprint);assertEquals("",c.narratorFingerprint);assertTrue(c.sceneHold);assertEquals(0,c.contentLevel);assertEquals(store.loadCampaign("a")!!.world,c.world)
   val notes=RoomMemoryRepository(db);val restoredNote=notes.recent(RoleContext(c.id,Audience.PUBLIC),5).single()
   assertEquals("修订约定",restoredNote.text)
   assertEquals(listOf("修订约定","约定"),notes.correctionHistory(RoleContext(c.id,Audience.PUBLIC),restoredNote.id).map{it.text})
@@ -162,9 +163,9 @@ class AgentDatabaseTest {
  @Test fun realTwelveNpcModuleTwoActionsReopenAndBackupIgnoreOnlyCollectionOrder()=runBlocking {
   val m=ExampleModules.all().first();assertEquals(12,m.world.npcs.size)
   val catalog=RoomModuleCatalog(db);catalog.install(m)
-  val engine=AgentCoordinator(store,catalog,RoomRuleRepository(db),RoomMemoryRepository(db),DemoTextModelPort(m),DiceSource{_->1},Clock{0})
+  val engine=AgentCoordinator(store,catalog,RoomRuleRepository(db),RoomMemoryRepository(db),DemoTextModelPort(m),DemoTextModelPort(m),DiceSource{_->1},Clock{0})
   val ref=VersionRef(m.manifest.moduleId,m.manifest.version,m.contentHash)
-  engine.create("twelve","真实示例备份",ref,m.world.characters.first().id,false,"demo")
+  engine.create("twelve","真实示例备份",ref,m.world.characters.first().id,false,"demo","demo")
   assertEquals(TurnPhase.COMPLETE,engine.submit("twelve","wait","等待").phase)
   assertEquals(TurnPhase.COMPLETE,engine.submit("twelve","talk","交谈${m.world.npcs.first().name}").phase)
   val before=store.loadCampaign("twelve")!!;assertEquals(2L,before.lastEventSeq)
@@ -197,7 +198,7 @@ class AgentDatabaseTest {
  /** Installs the wuxia module, commits one weapon turn through the real adapter, and returns the stored campaign. */
  private fun committedWuxia(id:String):Campaign {
   val m=wuxia;RoomModuleCatalog(db).install(m)
-  store.createCampaign(Campaign(id,id,VersionRef("wx","1.0.0",m.contentHash),VersionRef("wuxia-d20-v1","1",m.contentHash),0,0,initialWorld(m,"wx:hero"),false,"local-profile",0))
+  store.createCampaign(Campaign(id,id,VersionRef("wx","1.0.0",m.contentHash),VersionRef("wuxia-d20-v1","1",m.contentHash),0,0,initialWorld(m,"wx:hero"),false,"local-profile","local-narrator",0))
   val c=store.loadCampaign(id)!!
   val proposal=ActionProposal("d20",emptyList(),null,"",listOf("wx:rule"),emptyList(),emptyList(),emptyList(),publicSummary="出剑",d20=listOf(D20Action("weapon","wx:hero",listOf("wx:foe"),weaponId="sword")))
   val plan=freeze(c,proposal,m.rules.evidence)
@@ -243,17 +244,18 @@ class AgentDatabaseTest {
   val file="agent-migration-${UUID.randomUUID()}.db"
   try {
    migrations.createDatabase(file,1).also{old->
-    old.execSQL("INSERT INTO campaign(id,title,moduleId,moduleVersion,moduleHash,rulesJson,revision,lastEventSeq,locationId,resourcesJson,skillsJson,gameTime,allowGeneration,modelFingerprint,updatedAt,pendingTurnId,nextTurnOrdinal) VALUES('old','旧战役','test','1.0.0','h','{\"id\":\"generic-d100-v1\",\"version\":\"1\",\"hash\":\"h\"}',3,3,'test:room','{}','{}',0,0,'',5,NULL,1)")
+    old.execSQL("INSERT INTO campaign(id,title,moduleId,moduleVersion,moduleHash,rulesJson,revision,lastEventSeq,locationId,resourcesJson,skillsJson,gameTime,allowGeneration,modelFingerprint,updatedAt,pendingTurnId,nextTurnOrdinal) VALUES('old','旧战役','test','1.0.0','h','{\"id\":\"generic-d100-v1\",\"version\":\"1\",\"hash\":\"h\"}',3,3,'test:room','{}','{}',0,0,'old-model',5,NULL,1)")
     old.close()
    }
    migrations.runMigrationsAndValidate(file,2,true,AGENT_MIGRATION_1_2).also{migrated->
     migrated.query("SELECT d20Json FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertTrue(cursor.isNull(0))}
+    migrated.query("SELECT modelFingerprint,narratorFingerprint,contentLevel,sceneHold FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertEquals("old-model",cursor.getString(0));assertEquals("old-model",cursor.getString(1));assertEquals(0,cursor.getInt(2));assertEquals(0,cursor.getInt(3))}
     migrated.close()
    }
    val reopened=Room.databaseBuilder(context,AgentDatabase::class.java,file).addMigrations(AGENT_MIGRATION_1_2).build()
    try{
     val old=RoomAgentStore(reopened).loadCampaign("old")!!
-    assertEquals(3L,old.revision);assertNull(old.world.d20)
+    assertEquals(3L,old.revision);assertNull(old.world.d20);assertEquals("old-model",old.narratorFingerprint)
    } finally {reopened.close()}
   } finally {context.deleteDatabase(file)}
  }

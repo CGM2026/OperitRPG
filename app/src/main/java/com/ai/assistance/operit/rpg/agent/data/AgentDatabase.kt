@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.serialization.Serializable
 
 @Entity(tableName = "campaign")
-data class CampaignRow(@PrimaryKey val id: String, val title: String, val moduleId: String, val moduleVersion: String, val moduleHash: String, val rulesJson: String, val revision: Long, val lastEventSeq: Long, val locationId: String, val resourcesJson: String, val skillsJson: String, val gameTime: Long, val allowGeneration: Boolean, val modelFingerprint: String, val updatedAt: Long, val pendingTurnId: String?, val nextTurnOrdinal:Long, val d20Json:String?)
+data class CampaignRow(@PrimaryKey val id: String, val title: String, val moduleId: String, val moduleVersion: String, val moduleHash: String, val rulesJson: String, val revision: Long, val lastEventSeq: Long, val locationId: String, val resourcesJson: String, val skillsJson: String, val gameTime: Long, val allowGeneration: Boolean, val modelFingerprint: String, @ColumnInfo(defaultValue = "") val narratorFingerprint: String, val updatedAt: Long, val pendingTurnId: String?, val nextTurnOrdinal:Long, val d20Json:String?, @ColumnInfo(defaultValue = "0") val contentLevel:Int, @ColumnInfo(defaultValue = "0") val sceneHold:Boolean)
 @Entity(tableName = "turn", indices = [Index(value=["campaignId", "clientMessageId"], unique=true), Index(value=["campaignId", "ordinal"], unique=true)], foreignKeys=[ForeignKey(entity=CampaignRow::class,parentColumns=["id"],childColumns=["campaignId"],onDelete=ForeignKey.CASCADE)])
 data class TurnRow(@PrimaryKey val id: String, val campaignId: String, val clientMessageId: String, val ordinal: Long, val phase: String, val json: String)
 @Entity(tableName = "event", primaryKeys=["campaignId", "seq"], indices=[Index("turnId", unique=true)], foreignKeys=[ForeignKey(entity=CampaignRow::class,parentColumns=["id"],childColumns=["campaignId"],onDelete=ForeignKey.CASCADE), ForeignKey(entity=TurnRow::class,parentColumns=["id"],childColumns=["turnId"])])
@@ -141,8 +141,8 @@ data class CorrectionRow(@PrimaryKey val id:String,val campaignId:String,val old
  @Query("SELECT d.* FROM reference_document d INNER JOIN campaign_document c ON d.id=c.documentId WHERE c.campaignId=:campaign ORDER BY d.id LIMIT :limit OFFSET :offset") fun attachedDocuments(campaign:String,offset:Int,limit:Int):List<DocumentRow>
 }
 
-/** wuxia-d20-v1 keeps WorldState.d20 as JSON on the campaign row; existing rows get NULL. */
-val AGENT_MIGRATION_1_2=object:Migration(1,2){ override fun migrate(db:SupportSQLiteDatabase){ db.execSQL("ALTER TABLE campaign ADD COLUMN d20Json TEXT") } }
+/** wuxia-d20-v1 keeps WorldState.d20 as JSON on the campaign row; existing rows get NULL. Planner and narrator are bound separately; the narrator column is filled once from the old single model binding. */
+val AGENT_MIGRATION_1_2=object:Migration(1,2){ override fun migrate(db:SupportSQLiteDatabase){ db.execSQL("ALTER TABLE campaign ADD COLUMN d20Json TEXT"); db.execSQL("ALTER TABLE campaign ADD COLUMN narratorFingerprint TEXT NOT NULL DEFAULT ''"); db.execSQL("UPDATE campaign SET narratorFingerprint=modelFingerprint"); db.execSQL("ALTER TABLE campaign ADD COLUMN contentLevel INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE campaign ADD COLUMN sceneHold INTEGER NOT NULL DEFAULT 0") } }
 @Database(entities=[CampaignRow::class,TurnRow::class,EventRow::class,AttemptRow::class,ToolResultRow::class,NarrationRow::class,WorldEntityRow::class,KnowledgeRow::class,NpcRow::class,NpcRelationRow::class,NpcGoalRow::class,FactRow::class,ClaimRow::class,ModuleRow::class,SourcePartRow::class,RuleChunkRow::class,RuleFtsRow::class,MemoryRow::class,MemoryFtsRow::class,SummaryRow::class,DerivedJobRow::class,DocumentRow::class,DocumentPartRow::class,InitialStatePart::class,CampaignDocumentRow::class,SummarySourceRow::class,CorrectionRow::class],version=2,exportSchema=true)
 abstract class AgentDatabase:RoomDatabase() {
  abstract fun dao():AgentDao

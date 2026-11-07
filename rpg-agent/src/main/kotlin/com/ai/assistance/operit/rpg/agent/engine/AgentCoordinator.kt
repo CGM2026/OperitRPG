@@ -9,13 +9,13 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.*
 import java.util.UUID
 
-class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCatalog,private val rules:RuleRepository,private val memories:MemoryRepository,private val model:TextModelPort,private val dice:DiceSource,private val clock:Clock) {
+class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCatalog,private val rules:RuleRepository,private val memories:MemoryRepository,private val planner:TextModelPort,private val narrator:TextModelPort,private val dice:DiceSource,private val clock:Clock) {
     private val contexts=ContextAssembler(memories)
     private val tools=ToolRegistry(rules,memories)
-    fun create(id:String,title:String,moduleRef:VersionRef,characterId:String,allowGeneration:Boolean,modelFingerprint:String):Campaign {
+    fun create(id:String,title:String,moduleRef:VersionRef,characterId:String,allowGeneration:Boolean,modelFingerprint:String,narratorFingerprint:String):Campaign {
         val m=catalog.get(moduleRef); RuleAdapters.forModule(m).validateModule(m)
-        require(m.contentHash==moduleRef.hash && modelFingerprint.isNotBlank())
-        val c=Campaign(id,title,moduleRef,VersionRef(m.rules.adapterId,m.rules.adapterVersion,m.contentHash),0,0,initialWorld(m,characterId),allowGeneration,modelFingerprint,clock.nowMillis())
+        require(m.contentHash==moduleRef.hash && modelFingerprint.isNotBlank() && narratorFingerprint.isNotBlank())
+        val c=Campaign(id,title,moduleRef,VersionRef(m.rules.adapterId,m.rules.adapterVersion,m.contentHash),0,0,initialWorld(m,characterId),allowGeneration,modelFingerprint,narratorFingerprint,clock.nowMillis(),contentLevel=m.rules.defaultContentLevel)
         store.createCampaign(c); return c
     }
     suspend fun submit(campaignId:String,clientMessageId:String,text:String):Turn {
@@ -47,15 +47,26 @@ class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCa
             require(old.phase !in setOf(TurnPhase.COMMITTED,TurnPhase.NARRATING,TurnPhase.COMPLETE,TurnPhase.CANCELLED)) { "ALREADY_COMMITTED" }
             old.copy(phase=TurnPhase.CANCELLED,error=null)
         }
-        t.attempts.filter { it.status=="RUNNING" }.forEach { model.cancel(it.id) }; return t
+        t.attempts.filter { it.status=="RUNNING" }.forEach { portFor(it.purpose).cancel(it.id) }; return t
     }
-    fun rebind(campaignId:String,fingerprint:String):Campaign = store.transaction(campaignId) { tx -> require(tx.session.pendingTurn==null) { "TURN_PENDING" }; require(fingerprint.isNotBlank()); tx.session.campaign.copy(modelFingerprint=fingerprint,updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) } }
+    fun rebindPlanner(campaignId:String,fingerprint:String):Campaign = store.transaction(campaignId) { tx -> require(tx.session.pendingTurn==null) { "TURN_PENDING" }; require(fingerprint.isNotBlank()); tx.session.campaign.copy(modelFingerprint=fingerprint,updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) } }
+    fun rebindNarrator(campaignId:String,fingerprint:String):Campaign = store.transaction(campaignId) { tx -> require(tx.session.pendingTurn==null) { "TURN_PENDING" }; require(fingerprint.isNotBlank()); tx.session.campaign.copy(narratorFingerprint=fingerprint,updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) } }
+    /** Table command: the next narration is told to wind the scene down; cleared once that narration completes. */
+    fun holdScene(campaignId:String):Campaign = store.transaction(campaignId) { tx ->
+        val c=tx.session.campaign; require(catalog.get(c.module).rules.contentLevels.isNotEmpty()) { "NO_CONTENT_LEVELS" }
+        c.copy(sceneHold=true,updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) }
+    }
+    /** Table command: moves the content level by [delta], clamped to the range the module declares. */
+    fun adjustContentLevel(campaignId:String,delta:Int):Campaign = store.transaction(campaignId) { tx ->
+        val c=tx.session.campaign; val levels=catalog.get(c.module).rules.contentLevels; require(levels.isNotEmpty()) { "NO_CONTENT_LEVELS" }
+        c.copy(contentLevel=(c.contentLevel+delta).coerceIn(0,levels.lastIndex),updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) }
+    }
     /** Explicit user choice for a committed result whose narration model became unavailable. */
     fun rebindInterruptedNarration(campaignId:String,turnId:String,fingerprint:String):Campaign = store.transaction(campaignId) { tx ->
         val t=requireNotNull(tx.session.pendingTurn)
         require(t.id==turnId && t.result!=null && t.phase in setOf(TurnPhase.COMMITTED,TurnPhase.NARRATING) && t.error!=null && t.attempts.none { it.status=="RUNNING" }) { "NARRATION_NOT_INTERRUPTED" }
         require(fingerprint.isNotBlank())
-        tx.session.campaign.copy(modelFingerprint=fingerprint,updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) }
+        tx.session.campaign.copy(narratorFingerprint=fingerprint,updatedAt=clock.nowMillis()).also { tx.saveCampaign(it) }
     }
     /** No network is restarted here; the caller displays explicit continue/cancel controls. */
     fun interrupt(campaignId:String):Turn? = store.transaction(campaignId) { tx -> tx.session.pendingTurn?.let { t -> t.copy(attempts=t.attempts.map { if(it.status=="RUNNING")it.copy(status="INTERRUPTED") else it },error="INTERRUPTED").also { tx.saveTurn(it) } } }
@@ -131,15 +142,22 @@ class AgentCoordinator(private val store:AgentStore,private val catalog:ModuleCa
             val t=mutate(campaignId,turnId) { _,old -> require(old.phase in setOf(TurnPhase.COMMITTED,TurnPhase.NARRATING)); old.copy(phase=TurnPhase.NARRATING,error=null) }
             val reply=request(c,t,contexts.narration(c,m,t),"narrator",TurnPhase.NARRATING)
             validatePublicText(reply.text,c)
-            return mutate(campaignId,turnId) { _,old -> require(old.phase==TurnPhase.NARRATING); old.copy(phase=TurnPhase.COMPLETE,narration=reply.text,error=null) }
+            return store.transaction(campaignId) { tx ->
+                val old=requireNotNull(tx.session.pendingTurn); require(old.id==turnId && old.phase==TurnPhase.NARRATING) { "TURN_NOT_PENDING" }
+                // The hold only applies to the narration that was assembled with it, so it is cleared exactly when that narration lands.
+                if(c.sceneHold)tx.saveCampaign(tx.session.campaign.copy(sceneHold=false,updatedAt=clock.nowMillis()))
+                old.copy(phase=TurnPhase.COMPLETE,narration=reply.text,error=null).also { tx.saveTurn(it) }
+            }
         } catch(e:Exception) { return fail(campaignId,turnId,e) }
     }
+    private fun portFor(purpose:String):TextModelPort = when(purpose) { "planner" -> planner; "narrator","npc_speaker" -> narrator; else -> throw IllegalArgumentException("UNKNOWN_PURPOSE") }
+    private fun fingerprintFor(c:Campaign,purpose:String):String = when(purpose) { "planner" -> c.modelFingerprint; "narrator","npc_speaker" -> c.narratorFingerprint; else -> throw IllegalArgumentException("UNKNOWN_PURPOSE") }
     private suspend fun request(c:Campaign,t:Turn,packet:ContextPacket,purpose:String,phase:TurnPhase):TextModelReply {
-        val id=UUID.randomUUID().toString()
-        mutate(c.id,t.id) { campaign,old -> require(old.phase==phase && campaign.modelFingerprint==c.modelFingerprint); old.copy(attempts=old.attempts+ModelAttempt(id,purpose,c.modelFingerprint,"RUNNING")) }
-        val reply=try { withTimeout(60000) { model.generate(id,packet) } } catch(e:Exception) { model.cancel(id); throw e }
+        val id=UUID.randomUUID().toString(); val port=portFor(purpose); val fingerprint=fingerprintFor(c,purpose)
+        mutate(c.id,t.id) { campaign,old -> require(old.phase==phase && fingerprintFor(campaign,purpose)==fingerprint); old.copy(attempts=old.attempts+ModelAttempt(id,purpose,fingerprint,"RUNNING")) }
+        val reply=try { withTimeout(60000) { port.generate(id,packet) } } catch(e:Exception) { port.cancel(id); throw e }
         require(reply.text.toByteArray().size<=65536) { "MODEL_OUTPUT_BUDGET" }
-        mutate(c.id,t.id) { campaign,old -> require(old.phase==phase && campaign.modelFingerprint==c.modelFingerprint && old.attempts.any { it.id==id && it.status=="RUNNING" }) { "STALE_ATTEMPT" }; old.copy(attempts=old.attempts.map { if(it.id==id)it.copy(status="COMPLETE",usage=reply.usage) else it }) }
+        mutate(c.id,t.id) { campaign,old -> require(old.phase==phase && fingerprintFor(campaign,purpose)==fingerprint && old.attempts.any { it.id==id && it.status=="RUNNING" }) { "STALE_ATTEMPT" }; old.copy(attempts=old.attempts.map { if(it.id==id)it.copy(status="COMPLETE",usage=reply.usage) else it }) }
         return reply
     }
     private fun mutate(campaignId:String,turnId:String,block:(Campaign,Turn)->Turn):Turn = store.transaction(campaignId) { tx -> val t=requireNotNull(tx.session.pendingTurn); require(t.id==turnId) { "TURN_NOT_PENDING" }; block(tx.session.campaign,t).also { tx.saveTurn(it) } }

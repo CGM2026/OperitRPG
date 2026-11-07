@@ -23,7 +23,7 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
    val manifest=db.atomic {
     val store=RoomAgentStore(db); val c=store.loadCampaign(campaignId)?:error("CAMPAIGN_NOT_FOUND")
     require(db.dao().campaign(campaignId)?.pendingTurnId==null){"FINISH_OR_CANCEL_PENDING_TURN"}
-    val safe=c.copy(modelFingerprint="")
+    val safe=c.copy(modelFingerprint="",narratorFingerprint="")
     write(dir,"campaign.json",encode(safe))
     write(dir,"initial.json",db.dao().initial(campaignId).joinToString(""){it.text})
     write(dir,"module.json",encode(RoomModuleCatalog(db).get(c.module)))
@@ -75,7 +75,7 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
    require(VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash)==manifest.module)
    val eventVersion=RuleAdapters.eventVersion(module.rules.adapterId);require(manifest.eventSchemaVersion==eventVersion){"UNSUPPORTED_BACKUP_VERSION"}
    val original=decode<Campaign>(read(dir,"campaign.json"));val initial=decode<WorldState>(read(dir,"initial.json"))
-   require(original.module==manifest.module && original.rules==manifest.rules && original.modelFingerprint.isEmpty())
+   require(original.module==manifest.module && original.rules==manifest.rules && original.modelFingerprint.isEmpty() && original.narratorFingerprint.isEmpty() && original.contentLevel in 0..maxOf(0,module.rules.contentLevels.size-1))
    adapter.validateState(initial,module)
    val canonicalInitial=canonicalWorld(initial)
    require(module.world.characters.any{canonicalWorld(initialWorld(module,it.id))==canonicalInitial}){"INVALID_INITIAL_STATE"}
@@ -87,7 +87,7 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
    return db.atomic {
     RoomModuleCatalog(db).install(module)
     val store=RoomAgentStore(db)
-    val restored=original.copy(id=newId,modelFingerprint="",updatedAt=System.currentTimeMillis())
+    val restored=original.copy(id=newId,modelFingerprint="",narratorFingerprint="",updatedAt=System.currentTimeMillis())
     store.createCampaign(restored)
     // Preserve the immutable starting state rather than replacing it with the final projection.
     db.openHelper.writableDatabase.execSQL("DELETE FROM initial_state_part WHERE campaignId=?",arrayOf(newId))

@@ -39,6 +39,7 @@ class GenericD100 : RuleAdapter {
     override fun validateModule(module: ValidatedModule) {
         val w = module.world; val r = module.rules
         require(r.adapterId == "generic-d100-v1" && r.adapterVersion == "1") { "UNKNOWN_RULE_ADAPTER" }
+        validateContentLevels(r)
         require(r.allowedEffects.all { it in effects }) { "UNKNOWN_EFFECT" }
         val ids = w.locations.map { it.id } + w.npcs.map { it.id } + w.items.map { it.id } + w.facts.map { it.id } + w.objectives.map { it.id } + w.characters.map { it.id } + w.actions.map { it.id }
         require(ids.distinct().size == ids.size && ids.all { it.startsWith(module.manifest.moduleId + ":") }) { "INVALID_ENTITY_ID" }
@@ -51,7 +52,7 @@ class GenericD100 : RuleAdapter {
         require(w.facts.all { validVisibility(it.visibility) }) { "INVALID_VISIBILITY" }
         require(w.policy.maxEntities in 0..100 && w.policy.allowedEntityTypes.all { it in setOf("npc", "location_detail") }) { "INVALID_GENERATION_POLICY" }
         require(w.policy.lockedFactIds.all { id -> w.facts.any { it.id == id && it.locked } })
-        val campaign = Campaign("validation", "", VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash),VersionRef(r.adapterId,r.adapterVersion,module.contentHash),0,0,initialWorld(module,w.characters.first().id),false,"",0)
+        val campaign = Campaign("validation", "", VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash),VersionRef(r.adapterId,r.adapterVersion,module.contentHash),0,0,initialWorld(module,w.characters.first().id),false,"","",0)
         w.actions.forEach { a ->
             val actionLocation=a.conditions.firstOrNull { it.type=="location" }?.targetId?:w.startLocationId
             val local=campaign.copy(world=campaign.world.copy(locationId=actionLocation))

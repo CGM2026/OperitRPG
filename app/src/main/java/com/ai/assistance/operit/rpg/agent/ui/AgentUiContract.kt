@@ -14,7 +14,7 @@ data class AgentTurnUi(val id: String, val input: String, val narration: String,
     val result: String?, val confirmation: String?, val error: String?, val canResume: Boolean,
     val canCancel: Boolean, val evidence: List<RuleEvidence>)
 data class AgentPlayUi(val id: String, val title: String, val location: String, val status: String,
-    val modelFingerprint: String, val turns: List<AgentTurnUi>, val people: List<AgentPerson>,
+    val modelFingerprint: String, val narratorFingerprint: String, val contentLevelLabel: String?, val turns: List<AgentTurnUi>, val people: List<AgentPerson>,
     val places: List<AgentPerson>, val facts: List<String>, val objectives: List<String>,
     val canAct: Boolean, val hasOlderTurns: Boolean)
 data class AgentDocumentUi(val id: String, val title: String)
@@ -26,7 +26,9 @@ data class AgentUiState(val entries: List<AgentEntry> = emptyList(), val modules
     val busy: Boolean = false, val progress: String? = null, val message: String? = null,
     val preview: AgentImportUi? = null, val draft: AgentDraftUi? = null, val hasMoreEntries: Boolean = false,
     val documentText: Pair<String, String>? = null, val hasSavedDraft: Boolean = false,
-    val sampleModules: List<AgentModuleOption> = emptyList())
+    val sampleModules: List<AgentModuleOption> = emptyList(),
+    /** Local replies to `//` table commands; shown in the conversation flow, never stored in the event stream. */
+    val notices: List<String> = emptyList())
 
 interface AgentUiController {
     val state: StateFlow<AgentUiState>
@@ -34,14 +36,15 @@ interface AgentUiController {
     fun loadMoreEntries()
     fun open(id: String)
     fun close()
-    fun create(title: String, module: VersionRef, characterId: String, allowGeneration: Boolean, modelId: String)
+    fun create(title: String, module: VersionRef, characterId: String, allowGeneration: Boolean, plannerModelId: String, narratorModelId: String)
     fun submit(text: String)
     fun confirm(turnId: String)
     fun resume(turnId: String)
     fun cancel(turnId: String)
     fun stop()
     fun loadOlder()
-    fun bindModel(modelId: String)
+    fun bindPlanner(modelId: String)
+    fun bindNarrator(modelId: String)
     fun previewFile(uri: Uri)
     fun previewExample(hash: String)
     fun commitImport()
