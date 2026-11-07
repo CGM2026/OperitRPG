@@ -2,6 +2,7 @@ package com.ai.assistance.operit.rpg.agent.data
 
 import com.ai.assistance.operit.rpg.agent.contract.*
 import java.util.UUID
+import com.ai.assistance.operit.rpg.agent.rules.Chapters
 import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 import com.ai.assistance.operit.rpg.agent.tools.StrictJson
 import kotlinx.serialization.encodeToString
@@ -88,7 +89,7 @@ class RoomMemoryRepository(private val db:AgentDatabase):MemoryRepository {
   require(item.toSeq<=c.lastEventSeq) { "INVALID_MEMORY_SOURCE" }
   require(item.status in setOf("ACTIVE","SUPERSEDED","INVALID"))
   require(com.ai.assistance.operit.rpg.agent.rules.validVisibility(item.visibility))
-  require(item.kind in setOf("EVENT","CONVERSATION","NOTE"))
+  require(item.kind in setOf("EVENT","CONVERSATION","NOTE",Chapters.SUMMARY_KIND))
   item.sourceTurnId?.let{require(db.dao().turn(item.campaignId,it)!=null){"INVALID_MEMORY_TURN_SOURCE"}}
   require(item.kind!="CONVERSATION" || item.sourceTurnId!=null){"CONVERSATION_SOURCE_REQUIRED"}
   require(db.dao().memory(item.campaignId,item.id)==null) { "MEMORY_IMMUTABLE" }
