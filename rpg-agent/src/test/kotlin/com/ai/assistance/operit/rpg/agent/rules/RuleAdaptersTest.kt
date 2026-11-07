@@ -26,4 +26,9 @@ class RuleAdaptersTest {
             assertEquals(Json.encodeToString(old),Json.encodeToString(GenericD100().planningRuleIndex(m)))
         }
     }
+    @Test fun eventVersionIsPerAdapter() {
+        assertEquals(1,RuleAdapters.eventVersion("generic-d100-v1"))
+        assertEquals(2,RuleAdapters.eventVersion(WuxiaD20.ID))
+        assertEquals("UNKNOWN_RULE_ADAPTER",assertFailsWith<IllegalArgumentException> { RuleAdapters.eventVersion("nope") }.message)
+    }
 }

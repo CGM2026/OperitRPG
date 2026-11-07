@@ -50,6 +50,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    sourceSets { getByName("androidTest").assets.srcDir("$projectDir/schemas") }
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }

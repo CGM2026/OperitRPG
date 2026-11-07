@@ -464,6 +464,47 @@ class WuxiaD20Test {
         assertFalse(packet.input.contains("t:far"))
     }
 
+    @Test fun committedResultKeepsTargetsOnlyForPlayerChecksAndSaves() {
+        val s = settle(fresh(), prop(checkAction(hero, skill = "athletics"), weapon(foe1, hero), cast(foe2, "bolt", hero)), Seq(9, 15, 3, 5, 3, 3))
+        assertEquals(s.event.rolls.size, s.result.rolls.size)
+        assertEquals(s.event.rolls.map { it.copy(target = null) }, s.result.rolls.map { it.copy(target = null) })
+        assertEquals(12, s.event.rolls.single { it.purpose == "attack:sword" }.target)
+        assertNull(s.result.rolls.single { it.purpose == "attack:sword" }.target)
+        assertEquals(13, s.result.rolls.single { it.purpose == "check:athletics" }.target)
+        assertEquals(12, s.result.rolls.single { it.purpose == "save:bolt" }.target)
+        assertTrue(s.result.rolls.filter { it.purpose.startsWith("damage:") }.all { it.target == null })
+    }
+
+    @Test fun publicRollsHidesNpcTargetsAndNonCheckPurposes() {
+        val pcs = setOf(hero)
+        val all = listOf(
+            RollRecord(hero, "check:athletics", "1d20", listOf(9), 4, 13, 13, true),
+            RollRecord(foe1, "check:insight", "1d20", listOf(9), 2, 11, 10, true),
+            RollRecord(hero, "save:bolt", "1d20", listOf(5), 0, 5, 12, false),
+            RollRecord(foe1, "save:bolt", "1d20", listOf(5), 0, 5, 12, false),
+            RollRecord(hero, "concentration", "1d20", listOf(5), 0, 5, 10, false),
+            RollRecord(hero, "repeat_save:poisoned", "1d20", listOf(5), 0, 5, 10, false),
+            RollRecord(hero, "contest:athletics", "1d20", listOf(5), 0, 5, 9, false),
+            RollRecord(hero, "attack:sword", "1d20", listOf(5), 0, 5, 12, false),
+        )
+        val pub = WuxiaD20.publicRolls(all, pcs)
+        assertEquals(listOf<Int?>(13, null, 12, null, 10, null, null, null), pub.map { it.target })
+        assertEquals(all.map { it.copy(target = null) }, pub.map { it.copy(target = null) })
+    }
+
+    @Test fun narrationCarriesPublicRollsAndPublicD20ViewWithoutNpcDefense() {
+        val c = fresh().edit(foe1) { it.copy(armorClass = 17) }
+        val s = settle(c, prop(weapon(hero, foe1), D20Action("check", foe2, attribute = "insight", dcTier = "easy")), Seq(14, 3, 7))
+        val packet = ContextAssembler(TestMemories()).narration(s.campaign, module, Turn("t", "c", 1, "m", "go", 0, TurnPhase.COMMITTED, result = s.result))
+        assertTrue(packet.input.contains("\"purpose\":\"attack:sword\""))
+        assertTrue(packet.input.contains("\"purpose\":\"check:insight\""))
+        assertTrue(packet.input.contains("d20Player"))
+        assertTrue(packet.input.contains("d20Visible"))
+        assertFalse(packet.input.contains("\"target\":17"))
+        assertFalse(packet.input.contains("\"target\":10"))
+        assertFalse(packet.input.contains("t:far"))
+    }
+
     // ------------------------------------------------------------ replay
 
     private fun randomProposal(rnd: Random): ActionProposal {

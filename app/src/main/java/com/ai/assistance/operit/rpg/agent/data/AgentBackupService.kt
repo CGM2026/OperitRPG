@@ -42,7 +42,7 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
     lines(dir,"summary-sources.jsonl"){emit->var offset=0;while(true){val rows=db.dao().summarySources(campaignId,offset,200);if(rows.isEmpty())break;rows.forEach{emit(encode(it))};offset+=rows.size}}
     lines(dir,"claims.jsonl"){emit->var offset=0;while(true){val rows=db.dao().claims(campaignId,offset,200);if(rows.isEmpty())break;rows.forEach{emit(encode(it))};offset+=rows.size}}
     File(dir,"document-parts.jsonl").bufferedWriter(Charsets.UTF_8).use { partsWriter->lines(dir,"documents.jsonl"){emit->var offset=0;while(true){val docs=db.dao().attachedDocuments(campaignId,offset,100);if(docs.isEmpty())break;docs.forEach{doc->emit(encode(doc));db.dao().documentParts(doc.id).forEach{partsWriter.write(encode(it));partsWriter.newLine()}};offset+=docs.size}} }
-    BackupManifestV2(2,LONGFORM_ENGINE,1,1,c.module,c.rules,names.sorted().map{n->val f=File(dir,n);FileDigest(n,f.length(),digest(f))})
+    BackupManifestV2(2,LONGFORM_ENGINE,1,RuleAdapters.eventVersion(c.rules.id),c.module,c.rules,names.sorted().map{n->val f=File(dir,n);FileDigest(n,f.length(),digest(f))})
    }
    ZipOutputStream(BufferedOutputStream(output)).use { zip->
     zip.putNextEntry(ZipEntry("manifest.json"));zip.write(encode(manifest).toByteArray(Charsets.UTF_8));zip.closeEntry()
@@ -55,11 +55,11 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
   try {
    unzip(input,dir)
    val manifest=decode<BackupManifestV2>(read(dir,"manifest.json"))
-   require(manifest.archiveFormatVersion==2 && manifest.engineId==LONGFORM_ENGINE && manifest.engineVersion==1 && manifest.eventSchemaVersion==1){"UNSUPPORTED_BACKUP_VERSION"}
+   require(manifest.archiveFormatVersion==2 && manifest.engineId==LONGFORM_ENGINE && manifest.engineVersion==1){"UNSUPPORTED_BACKUP_VERSION"}
    require(manifest.files.map{it.path}.toSet()==names && manifest.files.size==names.size)
    manifest.files.forEach{f->val file=File(dir,f.path);require(file.length()==f.size && digest(file)==f.sha256){"BACKUP_HASH_MISMATCH"}}
    val c=decode<Campaign>(read(dir,"campaign.json"))
-   require(c.module==manifest.module && c.rules==manifest.rules)
+   require(c.module==manifest.module && c.rules==manifest.rules && manifest.eventSchemaVersion==RuleAdapters.eventVersion(c.rules.id)){"UNSUPPORTED_BACKUP_VERSION"}
    return CampaignHeader(CampaignRef(LONGFORM_ENGINE,c.id),c.title,c.updatedAt)
   } finally {dir.deleteRecursively()}
  }
@@ -68,18 +68,19 @@ class AgentBackupService(private val db:AgentDatabase,private val tempDirectory:
   try {
    unzip(input,dir)
    val manifest=decode<BackupManifestV2>(read(dir,"manifest.json"))
-   require(manifest.archiveFormatVersion==2 && manifest.engineId==LONGFORM_ENGINE && manifest.engineVersion==1 && manifest.eventSchemaVersion==1){"UNSUPPORTED_BACKUP_VERSION"}
+   require(manifest.archiveFormatVersion==2 && manifest.engineId==LONGFORM_ENGINE && manifest.engineVersion==1){"UNSUPPORTED_BACKUP_VERSION"}
    require(manifest.files.map{it.path}.toSet()==names && manifest.files.size==names.size){"INVALID_FILE_MANIFEST"}
    manifest.files.forEach { f->val file=File(dir,f.path);require(file.length()==f.size && digest(file)==f.sha256){"BACKUP_HASH_MISMATCH:${f.path}"} }
    val module=decode<ValidatedModule>(read(dir,"module.json"));val adapter=RuleAdapters.forModule(module);validateStoredModule(module)
    require(VersionRef(module.manifest.moduleId,module.manifest.version,module.contentHash)==manifest.module)
+   val eventVersion=RuleAdapters.eventVersion(module.rules.adapterId);require(manifest.eventSchemaVersion==eventVersion){"UNSUPPORTED_BACKUP_VERSION"}
    val original=decode<Campaign>(read(dir,"campaign.json"));val initial=decode<WorldState>(read(dir,"initial.json"))
    require(original.module==manifest.module && original.rules==manifest.rules && original.modelFingerprint.isEmpty())
    adapter.validateState(initial,module)
    val canonicalInitial=canonicalWorld(initial)
    require(module.world.characters.any{canonicalWorld(initialWorld(module,it.id))==canonicalInitial}){"INVALID_INITIAL_STATE"}
    var replay=initial;var seq=0L
-   eachLine(dir,"events.jsonl"){line->val event=decode<WorldEvent>(line);require(event.campaignId==original.id && event.seq==++seq && event.eventVersion==1);replay=adapter.applyRecordedEvent(replay,event,module)}
+   eachLine(dir,"events.jsonl"){line->val event=decode<WorldEvent>(line);require(event.campaignId==original.id && event.seq==++seq && event.eventVersion==eventVersion);replay=adapter.applyRecordedEvent(replay,event,module)}
    require(seq==original.lastEventSeq && canonicalWorld(replay)==canonicalWorld(original.world) && original.revision==seq){"BACKUP_REPLAY_MISMATCH"}
    val newId=UUID.randomUUID().toString()
    fun mapped(id:String)="$newId:$id"

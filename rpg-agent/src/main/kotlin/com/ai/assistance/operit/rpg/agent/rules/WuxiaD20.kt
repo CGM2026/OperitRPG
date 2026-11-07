@@ -22,6 +22,11 @@ class WuxiaD20 : RuleAdapter {
 
         fun attributeBonus(score: Int): Int = Math.floorDiv(score - 10, 2)
         fun pcIds(module: ValidatedModule): Set<String> = module.world.characters.map { it.id }.toSet()
+        /** Public dice view: only the player's own check/save/concentration rolls keep their target; every other roll hides it so NPC defense and difficulty never leak. */
+        fun publicRolls(rolls: List<RollRecord>, playerIds: Set<String>): List<RollRecord> = rolls.map { r ->
+            val open = r.actorId in playerIds && (r.purpose.startsWith("check:") || r.purpose.startsWith("save:") || r.purpose.startsWith("concentration"))
+            if (open) r else r.copy(target = null)
+        }
         fun initialState(module: ValidatedModule, characterId: String): D20State {
             val pcs = pcIds(module)
             val present = module.world.d20Combatants.filter { it.id == characterId || it.id !in pcs }
@@ -345,7 +350,7 @@ class WuxiaD20 : RuleAdapter {
         val event = WorldEvent(2, campaign.id, campaign.lastEventSeq + 1, turnId, p.successEffects, p.creations, null, Visibility(Audience.PUBLIC), (plan.evidence.map { it.source } + p.successEffects.map { it.source }).distinct(), settle.rolls.toList(), settle.changes.toList())
         val replayed = applyRecordedEvent(campaign.world, event, module)
         check(replayed.d20 == settle.world.d20) { "REPLAY_MISMATCH" }
-        return event to CommittedResult(turnId, event.seq, success, null, p.publicSummary, plan.evidence.filter { it.visibility.audience == Audience.PUBLIC })
+        return event to CommittedResult(turnId, event.seq, success, null, p.publicSummary, plan.evidence.filter { it.visibility.audience == Audience.PUBLIC }, publicRolls(event.rolls, pcIds(module)))
     }
 
     private class D20Roll(val natural: Int, val faces: List<Int>, val expression: String)

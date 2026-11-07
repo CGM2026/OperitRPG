@@ -1,9 +1,12 @@
 package com.ai.assistance.operit.rpg.agent.data
 
 import androidx.room.Room
+import androidx.room.testing.MigrationTestHelper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
+import com.ai.assistance.operit.rpg.agent.rules.freeze
 import com.ai.assistance.operit.rpg.agent.rules.initialWorld
 import com.ai.assistance.operit.rpg.agent.tools.StrictJson
 import com.ai.assistance.operit.rpg.agent.module.ExampleModules
@@ -178,5 +181,80 @@ class AgentDatabaseTest {
   assertEquals(2,store.events(after.id,0,100).size)
   assertEquals(2,store.history(after.id,null,100).size)
   assertEquals(5,after.world.npcs.single{it.id==m.world.npcs.first().id}.relationships["trust"])
+ }
+ @get:Rule val migrations=MigrationTestHelper(InstrumentationRegistry.getInstrumentation(),AgentDatabase::class.java)
+ private val wuxia:ValidatedModule get() {
+  val text="检定使用二十面骰";val ref=SourceRef("module/sources/rules.md",sha256(text),"check","module_rule")
+  fun fighter(id:String,name:String)=D20Combatant(id,name,1,mapOf("might" to 14,"vigor" to 10),2,emptySet(),mapOf("athletics" to 1),12,mapOf("hp" to PoolValue(20,20)),emptyMap(),"long",emptyMap(),emptySet(),mapOf("sword" to WeaponAttack("Sword","might",true,"1d8+2")))
+  val d20=D20Rules(listOf("might","vigor"),mapOf("athletics" to "might"),mapOf("easy" to 10,"medium" to 13),mapOf("hp" to PoolRule("HP",restoreOn="long")),emptyMap(),emptyMap(),emptyMap(),RestRule(10,480,"hp"),true,setOf("hp"),"vigor")
+  val base=ValidatedModule(ModuleManifest(1,"wx","1.0.0","武侠","test","公开简介",1,"wuxia-d20-v1","1",emptyList()),"wx-hash",
+   ModuleWorld("wx:hall",listOf(CharacterTemplate("wx:hero","侠客",emptyMap(),emptyMap())),listOf(Location("wx:hall","大厅","",emptyList())),listOf(NpcState("wx:foe","恶徒","wx:hall","idle","凶狠","劫财")),emptyList(),emptyList(),emptyList(),emptyList(),GenerationPolicy(emptySet(),0,emptySet()),listOf(fighter("wx:hero","侠客"),fighter("wx:foe","恶徒"))),
+   ModuleRules("wuxia-d20-v1","1",emptySet(),emptyMap(),emptyMap(),setOf("time"),listOf(RuleEvidence("wx:rule",ref,text,Visibility(Audience.PUBLIC))),"分钟",d20),mapOf("module/sources/rules.md" to text))
+  val files=base.sources+mapOf("module/world.json" to encode(base.world),"module/rules.json" to encode(base.rules))
+  val manifest=base.manifest.copy(files=files.toSortedMap().map{FileDigest(it.key,it.value.toByteArray().size.toLong(),sha256(it.value))})
+  return base.copy(manifest=manifest,contentHash=sha256(StrictJson.json.encodeToString(manifest)),originalFiles=files)
+ }
+ /** Installs the wuxia module, commits one weapon turn through the real adapter, and returns the stored campaign. */
+ private fun committedWuxia(id:String):Campaign {
+  val m=wuxia;RoomModuleCatalog(db).install(m)
+  store.createCampaign(Campaign(id,id,VersionRef("wx","1.0.0",m.contentHash),VersionRef("wuxia-d20-v1","1",m.contentHash),0,0,initialWorld(m,"wx:hero"),false,"local-profile",0))
+  val c=store.loadCampaign(id)!!
+  val proposal=ActionProposal("d20",emptyList(),null,"",listOf("wx:rule"),emptyList(),emptyList(),emptyList(),publicSummary="出剑",d20=listOf(D20Action("weapon","wx:hero",listOf("wx:foe"),weaponId="sword")))
+  val plan=freeze(c,proposal,m.rules.evidence)
+  val adapter=RuleAdapters.forModule(m);val (event,result)=adapter.resolve(c,plan,m,"$id:t1",DiceSource{sides->minOf(sides,15)})
+  val world=adapter.applyRecordedEvent(c.world,event,m)
+  store.transaction(id){tx->
+   tx.saveTurn(Turn("$id:t1",id,1,"$id:m1","出剑",0,TurnPhase.COMPLETE,plan,result,"旁白"))
+   tx.appendEvent(event)
+   tx.saveCampaign(c.copy(world=world,revision=1,lastEventSeq=event.seq,nextTurnOrdinal=2,updatedAt=1))
+  }
+  return store.loadCampaign(id)!!
+ }
+ @Test fun wuxiaD20StateAndPublicRollsSurviveReopen(){
+  val saved=committedWuxia("w")
+  assertEquals(10,saved.world.d20!!.combatants.getValue("wx:foe").pools.getValue("hp").current)
+  db.close();open()
+  val reopened=store.loadCampaign("w")!!
+  assertEquals(saved.world.d20,reopened.world.d20);assertEquals(canonicalWorld(saved.world),canonicalWorld(reopened.world))
+  val event=store.events("w",0,10).single();assertEquals(2,event.eventVersion);assertEquals(12,event.rolls.first().target)
+  val rolls=store.history("w",null,10).single().result!!.rolls
+  assertEquals(event.rolls.size,rolls.size);assertTrue(rolls.all{it.target==null})
+  assertNull(store.loadCampaign("a")!!.world.d20)
+ }
+ @Test fun eventVersionFollowsTheCampaignRuleAdapter(){
+  committedWuxia("w")
+  val event=store.events("w",0,10).single()
+  try{store.transaction("w"){it.appendEvent(event.copy(eventVersion=1,seq=2))};fail("wuxia accepted a v1 event")}catch(_:IllegalArgumentException){}
+  try{store.transaction("a"){it.appendEvent(WorldEvent(2,"a",1,"a:t",emptyList(),emptyList(),null,Visibility(Audience.PUBLIC),emptyList()))};fail("generic accepted a v2 event")}catch(_:IllegalArgumentException){}
+  assertEquals(1,store.events("w",0,10).size);assertTrue(store.events("a",0,10).isEmpty())
+ }
+ @Test fun wuxiaBackupRoundTripRestoresD20StateAndRolls(){
+  val saved=committedWuxia("w")
+  val service=AgentBackupService(db,context.cacheDir);val out=ByteArrayOutputStream();service.export("w",out)
+  assertEquals("w",service.preview(ByteArrayInputStream(out.toByteArray())).title)
+  val restored=service.importBackup(ByteArrayInputStream(out.toByteArray()))
+  db.close();open()
+  val c=store.loadCampaign(restored.campaignId)!!
+  assertEquals(saved.world.d20,c.world.d20);assertEquals(canonicalWorld(saved.world),canonicalWorld(c.world))
+  assertEquals(2,store.events(c.id,0,10).single().eventVersion)
+  assertEquals(store.history("w",null,10).single().result!!.rolls,store.history(c.id,null,10).single().result!!.rolls)
+ }
+ @Test fun migration1To2AddsNullableD20JsonWithoutLosingCampaigns(){
+  val file="agent-migration-${UUID.randomUUID()}.db"
+  try {
+   migrations.createDatabase(file,1).also{old->
+    old.execSQL("INSERT INTO campaign(id,title,moduleId,moduleVersion,moduleHash,rulesJson,revision,lastEventSeq,locationId,resourcesJson,skillsJson,gameTime,allowGeneration,modelFingerprint,updatedAt,pendingTurnId,nextTurnOrdinal) VALUES('old','旧战役','test','1.0.0','h','{\"id\":\"generic-d100-v1\",\"version\":\"1\",\"hash\":\"h\"}',3,3,'test:room','{}','{}',0,0,'',5,NULL,1)")
+    old.close()
+   }
+   migrations.runMigrationsAndValidate(file,2,true,AGENT_MIGRATION_1_2).also{migrated->
+    migrated.query("SELECT d20Json FROM campaign WHERE id='old'").use{cursor->assertTrue(cursor.moveToFirst());assertTrue(cursor.isNull(0))}
+    migrated.close()
+   }
+   val reopened=Room.databaseBuilder(context,AgentDatabase::class.java,file).addMigrations(AGENT_MIGRATION_1_2).build()
+   try{
+    val old=RoomAgentStore(reopened).loadCampaign("old")!!
+    assertEquals(3L,old.revision);assertNull(old.world.d20)
+   } finally {reopened.close()}
+  } finally {context.deleteDatabase(file)}
  }
 }

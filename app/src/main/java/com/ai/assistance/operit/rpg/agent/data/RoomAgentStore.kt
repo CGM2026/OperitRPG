@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.rpg.agent.data
 
 import com.ai.assistance.operit.rpg.agent.contract.*
+import com.ai.assistance.operit.rpg.agent.rules.RuleAdapters
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -65,7 +66,7 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
     if(turn.phase==TurnPhase.COMPLETE && turn.ordinal%20L==0L && current.lastEventSeq>0) dao.insertJob(DerivedJobRow("summary:$campaignId:${turn.ordinal}",campaignId,"SUMMARY",maxOf(1,current.lastEventSeq-19),current.lastEventSeq,"PENDING",null))
    }
    override fun appendEvent(event:WorldEvent) {
-    require(event.campaignId==campaignId && event.eventVersion==1 && event.seq==current.lastEventSeq+1)
+    require(event.campaignId==campaignId && event.eventVersion==RuleAdapters.eventVersion(current.rules.id) && event.seq==current.lastEventSeq+1)
     val latest=dao.events(campaignId,event.seq-1,1)
     require(latest.isEmpty()) { "DUPLICATE_EVENT" }
     dao.insertEvent(EventRow(campaignId,event.seq,event.turnId,event.eventVersion,encode(event)))
@@ -88,14 +89,14 @@ class RoomAgentStore(private val db:AgentDatabase):AgentStore {
   require(c.world.npcs.map{it.id}.distinct().size==c.world.npcs.size)
   require(c.world.knowledge.all{k->c.world.facts.any{it.id==k.factId} && (k.knowerId=="player" || c.world.npcs.any{it.id==k.knowerId})}) { "INVALID_KNOWLEDGE_REFERENCE" }
  }
- private fun Campaign.row(pending:String?)=CampaignRow(id,title,module.id,module.version,module.hash,encode(rules),revision,lastEventSeq,world.locationId,encode(world.resources),encode(world.skills),world.gameTime,allowGeneration,modelFingerprint,updatedAt,pending,nextTurnOrdinal)
+ private fun Campaign.row(pending:String?)=CampaignRow(id,title,module.id,module.version,module.hash,encode(rules),revision,lastEventSeq,world.locationId,encode(world.resources),encode(world.skills),world.gameTime,allowGeneration,modelFingerprint,updatedAt,pending,nextTurnOrdinal,world.d20?.let{encode(it)})
  private fun campaign(r:CampaignRow):Campaign {
   val rows=dao.world(r.id)
   fun <T> entities(kind:String,read:(String)->T)=rows.filter{it.kind==kind}.map{read(it.json)}
   val relations=dao.relations(r.id).groupBy{it.npcId};val goals=dao.goals(r.id).associate{it.npcId to it.goal}
   val npcs=dao.npcs(r.id).map{NpcState(it.id,it.name,it.locationId,it.status,it.personality,goals.getValue(it.id),relations[it.id].orEmpty().associate{r->r.dimension to r.value},it.nextActionAt)}
   val facts=dao.facts(r.id).map{Fact(it.id,it.text,Visibility(Audience.valueOf(it.audience),it.subjectId),it.locked,decode(it.sourceJson))}
-  val world=WorldState(r.locationId,decode(r.resourcesJson),decode(r.skillsJson),npcs,entities("ITEM"){decode<Item>(it)},facts,entities("OBJECTIVE"){decode<Objective>(it)},dao.knowledge(r.id).map{KnowledgeEdge(it.knowerId,it.factId,it.learnedAtSeq,it.method,it.belief)},entities("GENERATED"){decode<EntityCreation>(it)},r.gameTime)
+  val world=WorldState(r.locationId,decode(r.resourcesJson),decode(r.skillsJson),npcs,entities("ITEM"){decode<Item>(it)},facts,entities("OBJECTIVE"){decode<Objective>(it)},dao.knowledge(r.id).map{KnowledgeEdge(it.knowerId,it.factId,it.learnedAtSeq,it.method,it.belief)},entities("GENERATED"){decode<EntityCreation>(it)},r.gameTime,r.d20Json?.let{decode<D20State>(it)})
   return Campaign(r.id,r.title,VersionRef(r.moduleId,r.moduleVersion,r.moduleHash),decode(r.rulesJson),r.revision,r.lastEventSeq,world,r.allowGeneration,r.modelFingerprint,r.updatedAt,r.nextTurnOrdinal)
  }
  private fun saveWorld(c:Campaign) {

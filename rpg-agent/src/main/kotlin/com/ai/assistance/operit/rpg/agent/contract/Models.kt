@@ -38,7 +38,7 @@ const val LONGFORM_ENGINE = "longform-v1"
 @Serializable data class FrozenPlan(val baseRevision: Long, val moduleHash: String, val rulesHash: String, val modelFingerprint: String, val proposal: ActionProposal, val evidence: List<RuleEvidence>, val planHash: String)
 @Serializable data class DiceRoll(val sides: Int, val value: Int, val threshold: Int)
 @Serializable data class WorldEvent(val eventVersion: Int, val campaignId: String, val seq: Long, val turnId: String, val effects: List<Effect>, val creations: List<EntityCreation>, val dice: DiceRoll?, val visibility: Visibility, val sources: List<SourceRef>, val rolls: List<RollRecord> = emptyList(), val d20Changes: List<D20Change> = emptyList())
-@Serializable data class CommittedResult(val turnId: String, val eventSeq: Long, val success: Boolean, val dice: DiceRoll?, val publicSummary: String, val evidence: List<RuleEvidence>)
+@Serializable data class CommittedResult(val turnId: String, val eventSeq: Long, val success: Boolean, val dice: DiceRoll?, val publicSummary: String, val evidence: List<RuleEvidence>, val rolls: List<RollRecord> = emptyList())
 @Serializable data class ToolCall(val invocationId: String, val name: String, val arguments: JsonObject)
 @Serializable data class ToolResult(val invocationId: String, val toolSchemaVersion: Int, val argumentHash: String, val revision: Long, val sourceRefs: List<SourceRef>, val output: String)
 @Serializable data class AgentStep(val version: Int, val kind: String, val calls: List<ToolCall>? = null, val proposal: ActionProposal? = null, val text: String? = null)
